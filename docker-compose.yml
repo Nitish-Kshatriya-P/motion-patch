@@ -11,5 +11,27 @@ services:
       - CLICKHOUSE_PASSWORD=
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:8123/ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      
+  init-db:
+    image: python:3.11-slim
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ~/.config/gcloud:/root/.config/gcloud:ro
+      - ${APPDATA:-~/.config}/gcloud:/root/.config/gcloud_windows:ro
+    working_dir: /app
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
+    command: >
+      bash -c "pip install clickhouse-connect google-cloud-aiplatform && python init_clickhouse.py"
+
 volumes:
   clickhouse_data:

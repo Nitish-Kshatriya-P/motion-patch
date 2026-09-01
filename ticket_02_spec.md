@@ -1,6 +1,6 @@
 Ticket 02: Single-Agent Headless Blender Execution.
 
-Introduce Google ADK and Blender. The user types a text prompt on the frontend. The FastAPI backend sends the prompt and BVH to a single ADK agent (Gemini 1.5 Pro). The agent generates a `bpy` (Blender Python) script. The backend executes the script via a headless Blender instance to modify the `.bvh` file, and sends the fixed file back to the React viewer.
+Introduce Google ADK and Blender. The user types a text prompt on the frontend. The FastAPI backend sends the prompt and BVH to a single ADK agent (Gemini 2.5 Pro). The agent generates a `bpy` (Blender Python) script. The backend executes the script via a headless Blender instance to modify the `.bvh` file, and sends the fixed file back to the React viewer.
 
 Requirements:
 - Configure Google ADK with a single agent prompt.

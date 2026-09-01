@@ -5,11 +5,17 @@ from pydantic import BaseModel
 import uuid
 import os
 import logging
-from agent import generate_blender_script
+from contextlib import asynccontextmanager
+from agent import generate_blender_script, init_mcp, cleanup_mcp
 from blender import execute_blender_script
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_mcp()
+    yield
+    await cleanup_mcp()
 
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,6 +45,12 @@ def validate_bvh(content: bytes) -> bool:
     except:
         return False
 
+def get_valid_bvh_path(file_id: str) -> str:
+    file_path = os.path.join(UPLOAD_DIR, f"{file_id}.bvh")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="BVH file not found")
+    return file_path
+
 @app.post("/upload")
 async def upload_bvh(file: UploadFile = File(...)):
     if not file.filename.lower().endswith('.bvh'):
@@ -58,26 +70,28 @@ async def upload_bvh(file: UploadFile = File(...)):
 
 @app.get("/bvh/{file_id}")
 async def get_bvh(file_id: str):
-    file_path = os.path.join(UPLOAD_DIR, f"{file_id}.bvh")
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    file_path = get_valid_bvh_path(file_id)
     return FileResponse(file_path, media_type="application/octet-stream", filename=f"{file_id}.bvh")
+
+class BVHFile:
+    def __init__(self, content: str):
+        self.content = content
+    
+    @property
+    def hierarchy(self) -> str:
+        return self.content.split("MOTION")[0].strip() if "MOTION" in self.content else self.content
 
 @app.post("/generate_code")
 async def generate_code(request: GenerateRequest):
     logger.info(f"Generating code for prompt: {request.prompt}")
     
-    bvh_path = os.path.join(UPLOAD_DIR, f"{request.bvh_id}.bvh")
-    if not os.path.exists(bvh_path):
-        raise HTTPException(status_code=404, detail="BVH file not found")
+    bvh_path = get_valid_bvh_path(request.bvh_id)
         
     with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
-        bvh_content = f.read()
-
-    hierarchy_only = bvh_content.split("MOTION")[0].strip() if "MOTION" in bvh_content else bvh_content
+        bvh_file = BVHFile(f.read())
 
     try:
-        script_code = generate_blender_script(request.prompt, hierarchy_only)
+        script_code = await generate_blender_script(request.prompt, bvh_file.hierarchy)
         logger.info(f"Generated Agent Code:\n{script_code}")
     except Exception as e:
         logger.error(f"Agent code generation failed: {e}")
@@ -85,18 +99,9 @@ async def generate_code(request: GenerateRequest):
 
     return {"code": script_code}
 
-import ast
-
 @app.post("/run_blender")
 async def run_blender(request: RunCodeRequest):
-    try:
-        ast.parse(request.script_code)
-    except SyntaxError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid Python code syntax: {str(e)}")
-
-    input_bvh_path = os.path.join(UPLOAD_DIR, f"{request.bvh_id}.bvh")
-    if not os.path.exists(input_bvh_path):
-        raise HTTPException(status_code=404, detail="BVH file not found")
+    input_bvh_path = get_valid_bvh_path(request.bvh_id)
         
     temp_output_id = str(uuid.uuid4())
     

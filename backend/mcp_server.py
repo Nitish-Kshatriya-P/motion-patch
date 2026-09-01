@@ -1,28 +1,30 @@
 from mcp.server.fastmcp import FastMCP
-from vertexai.language_models import TextEmbeddingModel
-from config import init_vertexai, get_clickhouse_client
+from config import get_text_embedding, get_clickhouse_client
 import sys
+
+_client = None
+
+def get_shared_clickhouse_client():
+    global _client
+    if _client is None:
+        _client = get_clickhouse_client()
+    return _client
 
 mcp_server = FastMCP("ClickHouse RAG Memory")
 
-@mcp_server.tool()
+@mcp_server.tool(description="Queries the ClickHouse RAG memory bank for similar historical anomaly fixes based on a description of the problem. You MUST use this tool to find past solutions before writing code.")
 def query_rag_memory(anomaly_query: str) -> str:
-    """Queries the ClickHouse RAG memory bank for similar historical anomaly fixes based on a description of the problem. You MUST use this tool to find past solutions before writing code."""
     try:
-        init_vertexai()
-        model = TextEmbeddingModel.from_pretrained("text-embedding-004")
-        embeddings = model.get_embeddings([anomaly_query])
-        query_vector = embeddings[0].values
+        query_vector = get_text_embedding(anomaly_query)
+        client = get_shared_clickhouse_client()
         
-        client = get_clickhouse_client()
-        
-        query = f"""
-            SELECT anomaly_desc, fix_script, cosineDistance(embedding, {query_vector}) as dist
+        query = """
+            SELECT anomaly_desc, fix_script, cosineDistance(embedding, {query_vector:Array(Float32)}) as dist
             FROM mocap_fixes
             ORDER BY dist ASC
             LIMIT 3
         """
-        result = client.query(query)
+        result = client.query(query, parameters={'query_vector': query_vector})
         
         if not result.result_rows:
             return "No past fixes found in memory bank."

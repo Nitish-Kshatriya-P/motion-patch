@@ -11,7 +11,7 @@ We need a fast, cheap, and highly accurate way for the agent to detect motion ca
 ## Decision
 We will use a **Two-Pass "Heuristic + Multimodal" Pipeline**:
 1. **Pass 1 (Deterministic & Free):** Fast, non-AI Python scripts scan the raw mocap data to flag *potential* regions of interest (ROI). For example, if a foot bone's Z-height is ~0 but its X/Y velocity is high, it flags a potential "foot slide". 
-2. **Pass 2 (Agentic & Cheap):** We render *only* the flagged 3-to-5 second clips as low-res viewport video. We send this short video to **Gemini 1.5 Pro (Multimodal)** to visually confirm: *"Is this a foot slide, or a moonwalk?"*
+2. **Pass 2 (Agentic & Cheap):** We render *only* the flagged 3-to-5 second clips as low-res viewport video. We send this short video to **Gemini 2.5 Pro (Multimodal)** to visually confirm: *"Is this a foot slide, or a moonwalk?"*
 
 ## Consequences
 - **Pros:** Drastically cuts token costs. Highly accurate because Gemini acts like a human director watching a screen.
