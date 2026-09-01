@@ -4,8 +4,8 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Provision ClickHouse Vector DB schema
-- [ ] Create ClickHouse MCP tool for ADK integration
-- [ ] Agent prompt updated to enforce querying the RAG memory before code generation
+- [x] Provision ClickHouse Vector DB schema
+- [x] Create ClickHouse MCP tool for ADK integration
+- [x] Agent prompt updated to enforce querying the RAG memory before code generation
