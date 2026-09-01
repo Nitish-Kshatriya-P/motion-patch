@@ -106,9 +106,20 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
     }
   };
 
+  const isEditing = processingState === 'editing_code';
+  const isProcessing = processingState === 'generating_code' || processingState === 'processing_blender';
+
   return (
-    <div className="w-full h-full flex flex-row">
-      <div className={`relative ${processingState === 'editing_code' ? 'w-1/2 border-r border-gray-700' : 'w-full'} h-full transition-all duration-300`}>
+    <div className="w-full h-full flex flex-row relative">
+      {error && !isEditing && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 z-50">
+          <div className="bg-red-500/90 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
+            {error}
+          </div>
+        </div>
+      )}
+
+      <div className={`relative ${isEditing ? 'w-1/2 border-r border-gray-700' : 'w-full'} h-full transition-all duration-300`}>
         <Canvas camera={{ position: [0, 100, 400], fov: 50 }}>
           <color attach="background" args={['#111']} />
           <ambientLight intensity={0.5} />
@@ -123,13 +134,7 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
         </Canvas>
 
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 flex flex-col gap-2 z-10">
-          {error && (
-            <div className="bg-red-500/90 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
-              {error}
-            </div>
-          )}
-          
-          {['generating_code', 'processing_blender'].includes(processingState) && (
+          {isProcessing && (
             <div className="flex items-center justify-center gap-3 bg-blue-600/90 text-white px-6 py-3 rounded-xl shadow-lg mx-auto w-fit">
               <Loader2 className="w-5 h-5 animate-spin" />
               <span className="font-medium">
@@ -138,7 +143,7 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
             </div>
           )}
 
-          {processingState !== 'editing_code' && (
+          {!isEditing && (
             <div className="flex items-center bg-white/10 backdrop-blur-md rounded-xl p-2 border border-white/20 shadow-2xl">
               <input 
                 type="text"
@@ -163,8 +168,15 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
         </div>
       </div>
 
-      {processingState === 'editing_code' && (
-        <div className="w-1/2 h-full flex flex-col bg-[#1e1e1e]">
+      {isEditing && (
+        <div className="w-1/2 h-full flex flex-col bg-[#1e1e1e] relative">
+          {error && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 z-50">
+              <div className="bg-red-500/90 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
+                {error}
+              </div>
+            </div>
+          )}
           <div className="flex justify-between items-center px-4 py-3 bg-gray-800 border-b border-gray-700">
             <h3 className="text-white font-medium text-sm">Review & Edit Code (bpy)</h3>
             <div className="flex gap-2">

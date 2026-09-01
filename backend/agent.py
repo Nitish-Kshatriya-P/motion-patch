@@ -1,8 +1,6 @@
 import os
 import logging
-from google import genai
-from google.genai import types
-from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration
+from vertexai.generative_models import GenerativeModel
 import vertexai
 
 logger = logging.getLogger(__name__)
@@ -26,65 +24,20 @@ def generate_blender_script(prompt: str, hierarchy_only: str) -> str:
     
     full_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```\n\nUser Request: {prompt}"
 
-    try:
-        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "test-project")
-        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-        vertexai.init(project=project, location=location)
-        
-        query_clickhouse_rag = FunctionDeclaration(
-            name="query_clickhouse_rag",
-            description="Queries the ClickHouse RAG Vector Database for historical successful mocap fixes that match the current anomaly.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "anomaly_description": {
-                        "type": "string",
-                        "description": "Description of the mocap anomaly"
-                    }
-                }
-            },
-        )
-        clickhouse_tool = Tool(function_declarations=[query_clickhouse_rag])
-        
-        model = GenerativeModel(
-            model_name="gemini-2.5-pro",
-            system_instruction=system_instruction,
-            tools=[clickhouse_tool]
-        )
-        
-        logger.info("Using google-cloud-aiplatform (ADK) for generation.")
-        response = model.generate_content(
-            full_prompt,
-            generation_config={"temperature": 0.2}
-        )
-    except Exception as e:
-        logger.warning(f"ADK init failed or not configured, using google-genai fallback: {e}")
-        use_vertex = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() == "true"
-        client_kwargs = {}
-        if use_vertex:
-            client_kwargs["vertexai"] = True
-        
-        client = genai.Client(**client_kwargs)
-        
-        # ClickHouse tool mock for genai
-        tool = {"function_declarations": [{
-            "name": "query_clickhouse_rag",
-            "description": "Queries the ClickHouse RAG Vector Database for historical mocap fixes.",
-            "parameters": {
-                "type": "object",
-                "properties": {"anomaly_description": {"type": "string"}}
-            }
-        }]}
-        
-        response = client.models.generate_content(
-            model='gemini-2.5-pro',
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.2,
-                tools=[tool]
-            )
-        )
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "test-project")
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    vertexai.init(project=project, location=location)
+    
+    model = GenerativeModel(
+        model_name="gemini-1.5-pro",
+        system_instruction=system_instruction
+    )
+    
+    logger.info("Using google-cloud-aiplatform (ADK) for generation.")
+    response = model.generate_content(
+        full_prompt,
+        generation_config={"temperature": 0.2}
+    )
     
     script_code = response.text.strip()
     if script_code.startswith("```"):

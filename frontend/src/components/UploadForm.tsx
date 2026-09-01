@@ -7,7 +7,7 @@ interface UploadFormProps {
   onUploadSuccess: (id: string) => void;
 }
 
-export default function UploadForm({ onUploadSuccess: onUploadComplete }: UploadFormProps) {
+export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +32,7 @@ export default function UploadForm({ onUploadSuccess: onUploadComplete }: Upload
           'Content-Type': 'multipart/form-data',
         },
       });
-      onUploadComplete(response.data.id);
+      onUploadSuccess(response.data.id);
     } catch (err: any) {
       console.error(err);
       setError(extractError(err));

@@ -4,8 +4,8 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** closed
 
-- [ ] Add a code editor component (e.g., Monaco) to the React frontend
-- [ ] Backend logic to pause execution and yield script to client
-- [ ] Backend endpoint to receive explicitly modified `bpy` script and run it via Blender
+- [x] Add a code editor component (e.g., Monaco) to the React frontend
+- [x] Backend logic to pause execution and yield script to client
+- [x] Backend endpoint to receive explicitly modified `bpy` script and run it via Blender

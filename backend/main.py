@@ -83,9 +83,7 @@ async def generate_code(request: GenerateRequest):
         logger.error(f"Agent code generation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Agent code generation failed: {str(e)}")
 
-    script_id = str(uuid.uuid4())
-
-    return {"script_id": script_id, "code": script_code}
+    return {"code": script_code}
 
 import ast
 

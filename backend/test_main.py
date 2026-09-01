@@ -2,7 +2,6 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app, UPLOAD_DIR
 import os
-import uuid
 import shutil
 from unittest.mock import patch, MagicMock
 
@@ -12,7 +11,6 @@ client = TestClient(app)
 def run_around_tests():
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     yield
-    # Cleanup after tests
     for f in os.listdir(UPLOAD_DIR):
         file_path = os.path.join(UPLOAD_DIR, f)
         if os.path.isfile(file_path):
@@ -71,7 +69,6 @@ def test_generate_code_success(mock_model_class):
     
     assert response.status_code == 200
     data = response.json()
-    assert "script_id" in data
     assert "code" in data
     assert data["code"] == "import bpy\nprint('hello')"
 
@@ -84,8 +81,6 @@ def test_generate_code_error(mock_model_class):
 
     mock_model_class.side_effect = Exception("Vertex AI Error")
     
-    # Needs to be mocked in agent directly for fallback logic...
-    # For now, let's just mock generate_blender_script
     with patch("main.generate_blender_script") as mock_gen:
         mock_gen.side_effect = Exception("Vertex AI Error")
         response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": file_id})
@@ -100,7 +95,6 @@ def test_run_blender_success(mock_execute):
     res = client.post("/upload", files=files)
     file_id = res.json()["id"]
 
-    # Mock execute_blender_script to just create the output file
     def side_effect(input_bvh, script_code, upload_dir, temp_id):
         final_path = os.path.join(upload_dir, f"{temp_id}.bvh")
         with open(final_path, "w") as f:

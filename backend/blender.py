@@ -30,7 +30,6 @@ def execute_blender_script(input_bvh_path: str, script_code: str, upload_dir: st
         logger.info(f"Executing Docker command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         logger.info(f"Blender output:\n{result.stdout}")
-        subprocess.run(["docker", "rm", container_name], capture_output=True)
     except subprocess.CalledProcessError as e:
         logger.error(f"Blender execution failed:\nStdout: {e.stdout}\nStderr: {e.stderr}")
         docker_logs = subprocess.run(["docker", "logs", container_name], capture_output=True, text=True)
@@ -38,12 +37,12 @@ def execute_blender_script(input_bvh_path: str, script_code: str, upload_dir: st
         err_msg = e.stderr if e.stderr else e.stdout
         if not err_msg.strip():
             err_msg = docker_logs.stderr if docker_logs.stderr else docker_logs.stdout
-        subprocess.run(["docker", "rm", container_name], capture_output=True)
         raise RuntimeError(f"Blender execution failed. See logs. Output: {err_msg}")
+    finally:
+        subprocess.run(["docker", "rm", container_name], capture_output=True)
     
     if not os.path.exists(workspace_output):
         logger.error("Blender executed but output.bvh was not created.")
-        subprocess.run(["docker", "rm", container_name], capture_output=True)
         raise RuntimeError("Output BVH not generated.")
         
     final_output_path = os.path.join(upload_dir, f"{temp_output_id}.bvh")
