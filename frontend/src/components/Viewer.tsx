@@ -6,6 +6,7 @@ import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js';
 import axios from 'axios';
 import { Loader2, Send, Play } from 'lucide-react';
 import Editor from '@monaco-editor/react';
+import { extractError } from '../utils';
 
 function BvhModel({ url }: { url: string }) {
   const bvh = useLoader(BVHLoader as any, url);
@@ -63,14 +64,6 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
   const [processingState, setProcessingState] = useState<'idle' | 'generating_code' | 'editing_code' | 'processing_blender'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [scriptCode, setScriptCode] = useState<string>("");
-
-  const extractError = (err: any) => {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    if (Array.isArray(detail)) return detail.map(d => d.msg || JSON.stringify(d)).join(', ');
-    if (detail) return JSON.stringify(detail);
-    return err.message || "An error occurred";
-  };
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;

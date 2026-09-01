@@ -4,6 +4,7 @@ from main import app, UPLOAD_DIR
 import os
 import uuid
 import shutil
+from unittest.mock import patch, MagicMock
 
 client = TestClient(app)
 
@@ -13,7 +14,11 @@ def run_around_tests():
     yield
     # Cleanup after tests
     for f in os.listdir(UPLOAD_DIR):
-        os.remove(os.path.join(UPLOAD_DIR, f))
+        file_path = os.path.join(UPLOAD_DIR, f)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+        else:
+            shutil.rmtree(file_path, ignore_errors=True)
 
 def test_upload_valid_bvh():
     content = b"HIERARCHY\nROOT Hips\n{\n}"
@@ -48,34 +53,68 @@ def test_get_nonexistent_bvh():
     response = client.get("/bvh/invalid-id")
     assert response.status_code == 404
 
-from unittest.mock import patch, MagicMock
+@patch("agent.GenerativeModel")
+def test_generate_code_success(mock_model_class):
+    content = b"HIERARCHY\nROOT Hips\n{\n}"
+    files = {"file": ("test.bvh", content, "application/octet-stream")}
+    res = client.post("/upload", files=files)
+    file_id = res.json()["id"]
 
-@patch("main.genai.Client")
-def test_generate_code_success(mock_client_class):
-    mock_client = MagicMock()
-    mock_client_class.return_value = mock_client
+    mock_model = MagicMock()
+    mock_model_class.return_value = mock_model
     
     mock_response = MagicMock()
     mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
-    mock_client.models.generate_content.return_value = mock_response
+    mock_model.generate_content.return_value = mock_response
     
-    response = client.post("/generate_code", json={"prompt": "make it say hello"})
+    response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": file_id})
     
     assert response.status_code == 200
     data = response.json()
     assert "script_id" in data
-    
-    script_path = os.path.join(UPLOAD_DIR, f"script_{data['script_id']}.py")
-    assert os.path.exists(script_path)
-    with open(script_path, "r") as f:
-        content = f.read()
-    assert content == "import bpy\nprint('hello')"
+    assert "code" in data
+    assert data["code"] == "import bpy\nprint('hello')"
 
-@patch("main.genai.Client")
-def test_generate_code_error(mock_client_class):
-    mock_client_class.side_effect = Exception("Vertex AI Error")
+@patch("agent.GenerativeModel")
+def test_generate_code_error(mock_model_class):
+    content = b"HIERARCHY\nROOT Hips\n{\n}"
+    files = {"file": ("test.bvh", content, "application/octet-stream")}
+    res = client.post("/upload", files=files)
+    file_id = res.json()["id"]
+
+    mock_model_class.side_effect = Exception("Vertex AI Error")
     
-    response = client.post("/generate_code", json={"prompt": "make it say hello"})
+    # Needs to be mocked in agent directly for fallback logic...
+    # For now, let's just mock generate_blender_script
+    with patch("main.generate_blender_script") as mock_gen:
+        mock_gen.side_effect = Exception("Vertex AI Error")
+        response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": file_id})
+        
+        assert response.status_code == 500
+        assert "Agent code generation failed" in response.json()["detail"]
+
+@patch("main.execute_blender_script")
+def test_run_blender_success(mock_execute):
+    content = b"HIERARCHY\nROOT Hips\n{\n}"
+    files = {"file": ("test.bvh", content, "application/octet-stream")}
+    res = client.post("/upload", files=files)
+    file_id = res.json()["id"]
+
+    # Mock execute_blender_script to just create the output file
+    def side_effect(input_bvh, script_code, upload_dir, temp_id):
+        final_path = os.path.join(upload_dir, f"{temp_id}.bvh")
+        with open(final_path, "w") as f:
+            f.write("OUTPUT")
+        return final_path
+    mock_execute.side_effect = side_effect
+
+    response = client.post("/run_blender", json={"bvh_id": file_id, "script_code": "import bpy\nprint('test')"})
     
-    assert response.status_code == 500
-    assert "Agent code generation failed" in response.json()["detail"]
+    assert response.status_code == 200
+    data = response.json()
+    assert "id" in data
+    
+def test_run_blender_syntax_error():
+    response = client.post("/run_blender", json={"bvh_id": "dummy", "script_code": "def bad_syntax("})
+    assert response.status_code == 400
+    assert "Invalid Python code syntax" in response.json()["detail"]

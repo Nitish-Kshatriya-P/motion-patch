@@ -1,0 +1,7 @@
+backend/uploads/*
+__pycache__/
+.scratch/
+scratch/
+*.diff
+frontend/node_modules/
+.pytest_cache/

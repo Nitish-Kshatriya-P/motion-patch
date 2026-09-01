@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import { Upload, AlertCircle, Loader2 } from 'lucide-react';
+import { extractError } from '../utils';
 
 interface UploadFormProps {
   onUploadSuccess: (id: string) => void;
 }
 
-export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
+export default function UploadForm({ onUploadSuccess: onUploadComplete }: UploadFormProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,17 +32,10 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
           'Content-Type': 'multipart/form-data',
         },
       });
-      onUploadSuccess(response.data.id);
+      onUploadComplete(response.data.id);
     } catch (err: any) {
       console.error(err);
-      let errorMsg = 'Failed to upload file. Please verify it is a valid BVH format and the server is running.';
-      if (err.response?.data?.detail) {
-        const detail = err.response.data.detail;
-        errorMsg = typeof detail === 'string' ? detail : (Array.isArray(detail) ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ') : JSON.stringify(detail));
-      } else if (err.message) {
-        errorMsg = err.message;
-      }
-      setError(errorMsg);
+      setError(extractError(err));
     } finally {
       setIsUploading(false);
     }
