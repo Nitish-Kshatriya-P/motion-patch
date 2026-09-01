@@ -1,0 +1,1 @@
+Never expose sensitive details. Read code first. Zero comments. Need Google Cloud keys? Run wizard. Use Gemini 3.7 flash while you are calling for sub-agents. Use global skills when they can improve the quality of results for a particular task.

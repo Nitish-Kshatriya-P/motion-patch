@@ -12,8 +12,8 @@ function App() {
       {!bvhId ? (
         <UploadForm onUploadSuccess={setBvhId} />
       ) : (
-        <div className="w-full max-w-4xl h-[600px] bg-black rounded-lg overflow-hidden relative shadow-xl">
-          <Viewer bvhId={bvhId} />
+        <div className="w-full max-w-[1600px] h-[800px] bg-black rounded-lg overflow-hidden relative shadow-xl">
+          <Viewer bvhId={bvhId} onBvhUpdate={setBvhId} />
           <button 
             className="absolute top-4 left-4 bg-white hover:bg-gray-200 text-black px-4 py-2 rounded shadow-md z-10 font-medium transition-colors"
             onClick={() => setBvhId(null)}

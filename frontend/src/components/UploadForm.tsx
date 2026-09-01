@@ -34,7 +34,14 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
       onUploadSuccess(response.data.id);
     } catch (err: any) {
       console.error(err);
-      setError(err.response?.data?.detail || 'Failed to upload file. Please verify it is a valid BVH format and the server is running.');
+      let errorMsg = 'Failed to upload file. Please verify it is a valid BVH format and the server is running.';
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        errorMsg = typeof detail === 'string' ? detail : (Array.isArray(detail) ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ') : JSON.stringify(detail));
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      setError(errorMsg);
     } finally {
       setIsUploading(false);
     }
