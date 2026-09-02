@@ -109,7 +109,7 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       recorder.onstop = () => {
         const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
         stream.getTracks().forEach(track => track.stop());
-        submitGeneration(blob);
+        if (blob.size > 0) submitGeneration(blob);
       };
       
       recorder.start();

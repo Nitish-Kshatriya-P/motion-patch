@@ -97,7 +97,7 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio_data: 
     )])
     
     model = GenerativeModel(
-        model_name="gemini-2.5-pro",
+        model_name="gemini-1.5-pro",
         system_instruction=system_instruction,
         tools=[rag_tool]
     )

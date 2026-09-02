@@ -98,7 +98,9 @@ async def generate_code(
 
     audio_data = None
     if audio:
-        audio_data = (await audio.read(), audio.content_type)
+        content = await audio.read()
+        if content:
+            audio_data = (content, audio.content_type)
 
     try:
         script_code = await generate_blender_script(prompt, bvh_file.hierarchy, audio_data)
