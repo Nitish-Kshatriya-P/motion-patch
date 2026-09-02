@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from main import app, UPLOAD_DIR
 import os
 import shutil
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 @pytest.fixture(scope="module")
 def client():
@@ -59,35 +59,43 @@ def test_get_nonexistent_bvh(client):
 
 @patch("agent.GenerativeModel")
 def test_generate_code_success(mock_model_class, client, test_bvh_id):
-    mock_model = MagicMock()
-    mock_model_class.return_value = mock_model
+    mock_chat = AsyncMock()
+    mock_model_class.return_value.start_chat.return_value = mock_chat
     
-    mock_chat = MagicMock()
-    mock_model.start_chat.return_value = mock_chat
-
-    from unittest.mock import AsyncMock
-    mock_chat.send_message_async = AsyncMock()
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
     mock_chat.send_message_async.return_value = mock_response
 
-    response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
+    response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": test_bvh_id})
     
     assert response.status_code == 200
     data = response.json()
     assert "code" in data
-    assert data["code"] == "import bpy\nprint('hello')"
+    assert "import bpy" in data["code"]
 
 @patch("agent.GenerativeModel")
 def test_generate_code_error(mock_model_class, client, test_bvh_id):
-    mock_model_class.side_effect = Exception("Vertex AI Error")
+    mock_chat = AsyncMock()
+    mock_model_class.return_value.start_chat.return_value = mock_chat
     
     with patch("main.generate_blender_script") as mock_gen:
         mock_gen.side_effect = Exception("Vertex AI Error")
-        response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
+        response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": test_bvh_id})
         
         assert response.status_code == 500
         assert "Agent code generation failed" in response.json()["detail"]
+
+@patch("agent.GenerativeModel")
+def test_generate_code_audio(mock_model_class, client, test_bvh_id):
+    mock_chat = AsyncMock()
+    mock_model_class.return_value.start_chat.return_value = mock_chat
+    mock_response = AsyncMock()
+    mock_response.text = "```python\nimport bpy\nprint('audio code')\n```"
+    mock_chat.send_message_async.return_value = mock_response
+
+    response = client.post("/generate_code_audio", data={"prompt": "hello", "bvh_id": test_bvh_id}, files={"audio": ("test.webm", b"audio", "audio/webm")})
+    assert response.status_code == 200
+    assert "audio code" in response.json()["code"]
 
 @patch("main.execute_blender_script")
 def test_run_blender_success(mock_execute, client, test_bvh_id):

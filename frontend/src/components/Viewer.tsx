@@ -56,6 +56,65 @@ function Loader() {
   );
 }
 
+function HoldToSpeakButton({ onRecordingComplete, disabled }: { onRecordingComplete: (blob: Blob) => void, disabled: boolean }) {
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const audioChunks = useRef<Blob[]>([]);
+  const isIntentRecording = useRef(false);
+
+  const startRecording = async () => {
+    isIntentRecording.current = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!isIntentRecording.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      const recorder = new MediaRecorder(stream);
+      mediaRecorder.current = recorder;
+      audioChunks.current = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.current.push(e.data);
+      };
+      
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        if (blob.size > 0) onRecordingComplete(blob);
+      };
+      
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error accessing microphone", err);
+    }
+  };
+
+  const stopRecording = () => {
+    isIntentRecording.current = false;
+    if (mediaRecorder.current && isRecording) {
+      mediaRecorder.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  return (
+    <button
+      className={`${isRecording ? 'bg-red-600 animate-pulse' : 'bg-gray-600 hover:bg-gray-700'} disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 select-none touch-none`}
+      onMouseDown={startRecording}
+      onMouseUp={stopRecording}
+      onMouseLeave={stopRecording}
+      onTouchStart={startRecording}
+      onTouchEnd={stopRecording}
+      disabled={disabled}
+      title="Hold to Speak"
+    >
+      <Mic className="w-5 h-5" />
+    </button>
+  );
+}
+
 export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpdate?: (id: string) => void }) {
   const [timestamp, setTimestamp] = useState(() => Date.now());
   const url = `http://localhost:8000/bvh/${bvhId}?t=${timestamp}`;
@@ -64,9 +123,6 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
   const [processingState, setProcessingState] = useState<'idle' | 'generating_code' | 'editing_code' | 'processing_blender'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [scriptCode, setScriptCode] = useState<string>("");
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const audioChunks = useRef<Blob[]>([]);
 
   const submitGeneration = async (audioBlob?: Blob) => {
     setError(null);
@@ -76,11 +132,18 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       const formData = new FormData();
       formData.append('bvh_id', bvhId);
       formData.append('prompt', prompt);
+      
+      let endpoint = 'http://localhost:8000/generate_code';
+      let payload: any = { prompt, bvh_id: bvhId };
+      let config = {};
+      
       if (audioBlob) {
+        endpoint = 'http://localhost:8000/generate_code_audio';
         formData.append('audio', audioBlob, 'recording.webm');
+        payload = formData;
       }
 
-      const genRes = await axios.post('http://localhost:8000/generate_code', formData);
+      const genRes = await axios.post(endpoint, payload, config);
       setScriptCode(genRes.data.code);
       setProcessingState('editing_code');
     } catch (err: any) {
@@ -93,38 +156,6 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
     await submitGeneration();
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      mediaRecorder.current = recorder;
-      audioChunks.current = [];
-      
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunks.current.push(e.data);
-      };
-      
-      recorder.onstop = () => {
-        const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
-        stream.getTracks().forEach(track => track.stop());
-        if (blob.size > 0) submitGeneration(blob);
-      };
-      
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Error accessing microphone", err);
-      setError("Microphone access denied or not available");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder.current && isRecording) {
-      mediaRecorder.current.stop();
-      setIsRecording(false);
-    }
   };
 
   const handleExecute = async () => {

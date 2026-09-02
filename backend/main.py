@@ -82,13 +82,35 @@ class BVHFile:
         return self.content.split("MOTION")[0].strip() if "MOTION" in self.content else self.content
 
 from typing import Optional
+from agent import AudioPayload
 
 @app.post("/generate_code")
-async def generate_code(
+async def generate_code(request: GenerateRequest):
+    logger.info(f"Generating code for prompt: {request.prompt}")
+    
+    bvh_path = get_valid_bvh_path(request.bvh_id)
+        
+    with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
+        bvh_file = BVHFile(f.read())
+
+    try:
+        script_code = await generate_blender_script(request.prompt, bvh_file.hierarchy)
+        logger.info(f"Generated Agent Code:\n{script_code}")
+    except Exception as e:
+        logger.error(f"Agent code generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Agent code generation failed: {str(e)}")
+
+    return {"code": script_code}
+
+@app.post("/generate_code_audio")
+async def generate_code_audio(
     bvh_id: str = Form(...),
     prompt: Optional[str] = Form(""),
-    audio: Optional[UploadFile] = File(None)
+    audio: UploadFile = File(...)
 ):
+    if audio.content_type not in ["audio/webm", "audio/mp3", "audio/mpeg"]:
+        raise HTTPException(status_code=400, detail="Invalid audio format")
+
     logger.info(f"Generating code for prompt: {prompt}")
     
     bvh_path = get_valid_bvh_path(bvh_id)
@@ -97,10 +119,9 @@ async def generate_code(
         bvh_file = BVHFile(f.read())
 
     audio_data = None
-    if audio:
-        content = await audio.read()
-        if content:
-            audio_data = (content, audio.content_type)
+    content = await audio.read()
+    if content:
+        audio_data = AudioPayload(content, audio.content_type)
 
     try:
         script_code = await generate_blender_script(prompt, bvh_file.hierarchy, audio_data)

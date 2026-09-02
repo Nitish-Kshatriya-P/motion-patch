@@ -60,7 +60,13 @@ async def cleanup_mcp():
     if _mcp_client_ctx:
         await _mcp_client_ctx.__aexit__(None, None, None)
 
-async def generate_blender_script(prompt: str, hierarchy_only: str, audio_data: tuple[bytes, str] = None) -> str:
+from typing import NamedTuple
+
+class AudioPayload(NamedTuple):
+    data: bytes
+    mime_type: str
+
+async def generate_blender_script(prompt: str, hierarchy_only: str, audio: AudioPayload = None) -> str:
     boilerplate_guidelines = BLENDER_BOILERPLATE.format(fix_logic="- Perform the user's requested modifications using the Blender API on the armature and its bones.").split('\n')
     boilerplate_guidelines_str = "\n".join([f"- {line}" for line in boilerplate_guidelines])
     
@@ -80,10 +86,12 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio_data: 
     text_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```"
     if prompt:
         text_prompt += f"\n\nUser Request: {prompt}"
+    elif audio:
+        text_prompt += f"\n\nUser instructions are provided in the attached audio."
     contents.append(text_prompt)
     
-    if audio_data:
-        contents.append(Part.from_data(data=audio_data[0], mime_type=audio_data[1]))
+    if audio:
+        contents.append(Part.from_data(data=audio.data, mime_type=audio.mime_type))
 
     init_vertexai()
     
