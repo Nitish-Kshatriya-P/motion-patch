@@ -86,7 +86,7 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
     text_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```"
     if prompt:
         text_prompt += f"\n\nUser Request: {prompt}"
-    elif audio:
+    if audio:
         text_prompt += f"\n\nUser instructions are provided in the attached audio."
     contents.append(text_prompt)
     

@@ -56,7 +56,7 @@ function Loader() {
   );
 }
 
-function HoldToSpeakButton({ onRecordingComplete, disabled }: { onRecordingComplete: (blob: Blob) => void, disabled: boolean }) {
+function HoldToSpeakButton({ onRecordingComplete, onError, disabled }: { onRecordingComplete: (blob: Blob) => void, onError: (msg: string) => void, disabled: boolean }) {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -68,6 +68,7 @@ function HoldToSpeakButton({ onRecordingComplete, disabled }: { onRecordingCompl
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!isIntentRecording.current) {
         stream.getTracks().forEach(track => track.stop());
+        onError("Hold the button longer to record audio.");
         return;
       }
       const recorder = new MediaRecorder(stream);
@@ -88,6 +89,7 @@ function HoldToSpeakButton({ onRecordingComplete, disabled }: { onRecordingCompl
       setIsRecording(true);
     } catch (err) {
       console.error("Error accessing microphone", err);
+      onError("Microphone access denied or not available");
     }
   };
 
@@ -132,18 +134,11 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       const formData = new FormData();
       formData.append('bvh_id', bvhId);
       formData.append('prompt', prompt);
-      
-      let endpoint = 'http://localhost:8000/generate_code';
-      let payload: any = { prompt, bvh_id: bvhId };
-      let config = {};
-      
       if (audioBlob) {
-        endpoint = 'http://localhost:8000/generate_code_audio';
         formData.append('audio', audioBlob, 'recording.webm');
-        payload = formData;
       }
 
-      const genRes = await axios.post(endpoint, payload, config);
+      const genRes = await axios.post('http://localhost:8000/generate_code', formData);
       setScriptCode(genRes.data.code);
       setProcessingState('editing_code');
     } catch (err: any) {
@@ -231,18 +226,7 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
                   if (e.key === 'Enter') handleGenerate();
                 }}
               />
-              <button
-                className={`${isRecording ? 'bg-red-600 animate-pulse' : 'bg-gray-600 hover:bg-gray-700'} disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 select-none touch-none`}
-                onMouseDown={startRecording}
-                onMouseUp={stopRecording}
-                onMouseLeave={stopRecording}
-                onTouchStart={startRecording}
-                onTouchEnd={stopRecording}
-                disabled={processingState !== 'idle'}
-                title="Hold to Speak"
-              >
-                <Mic className="w-5 h-5" />
-              </button>
+              <HoldToSpeakButton onRecordingComplete={submitGeneration} onError={setError} disabled={processingState !== 'idle'} />
               <button 
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2"
                 onClick={handleGenerate}

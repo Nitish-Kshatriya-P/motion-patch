@@ -57,45 +57,32 @@ def test_get_nonexistent_bvh(client):
     response = client.get("/bvh/invalid-id")
     assert response.status_code == 404
 
-@patch("agent.GenerativeModel")
-def test_generate_code_success(mock_model_class, client, test_bvh_id):
-    mock_chat = AsyncMock()
-    mock_model_class.return_value.start_chat.return_value = mock_chat
-    
+@pytest.fixture
+def mock_chat():
+    with patch("agent.GenerativeModel") as mock_model_class:
+        chat = AsyncMock()
+        mock_model_class.return_value.start_chat.return_value = chat
+        yield chat
+
+def test_generate_code_success(mock_chat, client, test_bvh_id):
     mock_response = AsyncMock()
     mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
     mock_chat.send_message_async.return_value = mock_response
 
-    response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": test_bvh_id})
+    response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
     
     assert response.status_code == 200
     data = response.json()
     assert "code" in data
-    assert "import bpy" in data["code"]
+    assert data["code"] == "import bpy\nprint('hello')"
 
-@patch("agent.GenerativeModel")
-def test_generate_code_error(mock_model_class, client, test_bvh_id):
-    mock_chat = AsyncMock()
-    mock_model_class.return_value.start_chat.return_value = mock_chat
-    
+def test_generate_code_error(mock_chat, client, test_bvh_id):
     with patch("main.generate_blender_script") as mock_gen:
         mock_gen.side_effect = Exception("Vertex AI Error")
-        response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": test_bvh_id})
+        response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
         
         assert response.status_code == 500
         assert "Agent code generation failed" in response.json()["detail"]
-
-@patch("agent.GenerativeModel")
-def test_generate_code_audio(mock_model_class, client, test_bvh_id):
-    mock_chat = AsyncMock()
-    mock_model_class.return_value.start_chat.return_value = mock_chat
-    mock_response = AsyncMock()
-    mock_response.text = "```python\nimport bpy\nprint('audio code')\n```"
-    mock_chat.send_message_async.return_value = mock_response
-
-    response = client.post("/generate_code_audio", data={"prompt": "hello", "bvh_id": test_bvh_id}, files={"audio": ("test.webm", b"audio", "audio/webm")})
-    assert response.status_code == 200
-    assert "audio code" in response.json()["code"]
 
 @patch("main.execute_blender_script")
 def test_run_blender_success(mock_execute, client, test_bvh_id):
