@@ -60,7 +60,7 @@ async def cleanup_mcp():
     if _mcp_client_ctx:
         await _mcp_client_ctx.__aexit__(None, None, None)
 
-async def generate_blender_script(prompt: str, hierarchy_only: str) -> str:
+async def generate_blender_script(prompt: str, hierarchy_only: str, audio_bytes: bytes = None, audio_mime_type: str = None) -> str:
     boilerplate_guidelines = BLENDER_BOILERPLATE.format(fix_logic="- Perform the user's requested modifications using the Blender API on the armature and its bones.").split('\n')
     boilerplate_guidelines_str = "\n".join([f"- {line}" for line in boilerplate_guidelines])
     
@@ -75,7 +75,12 @@ async def generate_blender_script(prompt: str, hierarchy_only: str) -> str:
         "- Zero comments. Do NOT include any code comments in the generated python script.\n"
         "- You have access to a tool to search past fixes in the RAG memory bank. You MUST use this tool to query ClickHouse for similar past fixes before generating your code."
     )
-    full_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```\n\nUser Request: {prompt}"
+    
+    contents = []
+    text_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```\n\nUser Request: {prompt}"
+    contents.append(text_prompt)
+    if audio_bytes and audio_mime_type:
+        contents.append(Part.from_data(data=audio_bytes, mime_type=audio_mime_type))
 
     init_vertexai()
     
@@ -89,7 +94,7 @@ async def generate_blender_script(prompt: str, hierarchy_only: str) -> str:
     )])
     
     model = GenerativeModel(
-        model_name="gemini-2.5-pro",
+        model_name="gemini-1.5-pro",
         system_instruction=system_instruction,
         tools=[rag_tool]
     )
@@ -98,7 +103,7 @@ async def generate_blender_script(prompt: str, hierarchy_only: str) -> str:
     
     logger.info("Using google-cloud-aiplatform (ADK) for generation.")
     response = await chat.send_message_async(
-        full_prompt,
+        contents,
         generation_config={"temperature": 0.2}
     )
     

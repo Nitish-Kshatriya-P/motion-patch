@@ -71,7 +71,7 @@ def test_generate_code_success(mock_model_class, client, test_bvh_id):
     mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
     mock_chat.send_message_async.return_value = mock_response
 
-    response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": test_bvh_id})
+    response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
     
     assert response.status_code == 200
     data = response.json()
@@ -84,7 +84,7 @@ def test_generate_code_error(mock_model_class, client, test_bvh_id):
     
     with patch("main.generate_blender_script") as mock_gen:
         mock_gen.side_effect = Exception("Vertex AI Error")
-        response = client.post("/generate_code", json={"prompt": "make it say hello", "bvh_id": test_bvh_id})
+        response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
         
         assert response.status_code == 500
         assert "Agent code generation failed" in response.json()["detail"]

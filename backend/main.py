@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -81,17 +81,29 @@ class BVHFile:
     def hierarchy(self) -> str:
         return self.content.split("MOTION")[0].strip() if "MOTION" in self.content else self.content
 
+from typing import Optional
+
 @app.post("/generate_code")
-async def generate_code(request: GenerateRequest):
-    logger.info(f"Generating code for prompt: {request.prompt}")
+async def generate_code(
+    bvh_id: str = Form(...),
+    prompt: Optional[str] = Form(""),
+    audio: Optional[UploadFile] = File(None)
+):
+    logger.info(f"Generating code for prompt: {prompt}")
     
-    bvh_path = get_valid_bvh_path(request.bvh_id)
+    bvh_path = get_valid_bvh_path(bvh_id)
         
     with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
         bvh_file = BVHFile(f.read())
 
+    audio_bytes = None
+    audio_mime_type = None
+    if audio:
+        audio_bytes = await audio.read()
+        audio_mime_type = audio.content_type
+
     try:
-        script_code = await generate_blender_script(request.prompt, bvh_file.hierarchy)
+        script_code = await generate_blender_script(prompt, bvh_file.hierarchy, audio_bytes, audio_mime_type)
         logger.info(f"Generated Agent Code:\n{script_code}")
     except Exception as e:
         logger.error(f"Agent code generation failed: {e}")

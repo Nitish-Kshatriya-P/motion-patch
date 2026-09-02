@@ -4,8 +4,8 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] React UI component for "Hold to Speak" audio recording
-- [ ] Backend handling of `.webm`/`.mp3` blobs
-- [ ] ADK configuration updated to process raw multimodal audio alongside the `.bvh` context
+- [x] React UI component for "Hold to Speak" audio recording
+- [x] Backend handling of `.webm`/`.mp3` blobs
+- [x] ADK configuration updated to process raw multimodal audio alongside the `.bvh` context

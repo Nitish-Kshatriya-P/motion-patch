@@ -4,7 +4,7 @@ import { OrbitControls, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js';
 import axios from 'axios';
-import { Loader2, Send, Play } from 'lucide-react';
+import { Loader2, Send, Play, Mic } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { extractError } from '../utils';
 
@@ -64,6 +64,9 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
   const [processingState, setProcessingState] = useState<'idle' | 'generating_code' | 'editing_code' | 'processing_blender'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [scriptCode, setScriptCode] = useState<string>("");
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const audioChunks = useRef<Blob[]>([]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -71,7 +74,13 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
     setProcessingState('generating_code');
 
     try {
-      const genRes = await axios.post('http://localhost:8000/generate_code', { prompt, bvh_id: bvhId });
+      const formData = new FormData();
+      formData.append('bvh_id', bvhId);
+      formData.append('prompt', prompt);
+
+      const genRes = await axios.post('http://localhost:8000/generate_code', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
       const code = genRes.data.code;
       
       setScriptCode(code);
@@ -80,6 +89,62 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       console.error(err);
       setError(extractError(err));
       setProcessingState('idle');
+    }
+  };
+
+  const handleGenerateAudio = async (audioBlob: Blob) => {
+    setError(null);
+    setProcessingState('generating_code');
+
+    try {
+      const formData = new FormData();
+      formData.append('bvh_id', bvhId);
+      formData.append('prompt', prompt);
+      formData.append('audio', audioBlob, 'recording.webm');
+      
+      const genRes = await axios.post('http://localhost:8000/generate_code', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      const code = genRes.data.code;
+      
+      setScriptCode(code);
+      setProcessingState('editing_code');
+    } catch (err: any) {
+      console.error(err);
+      setError(extractError(err));
+      setProcessingState('idle');
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorder.current = recorder;
+      audioChunks.current = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.current.push(e.data);
+      };
+      
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        handleGenerateAudio(blob);
+      };
+      
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error accessing microphone", err);
+      setError("Microphone access denied or not available");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder.current && isRecording) {
+      mediaRecorder.current.stop();
+      setIsRecording(false);
     }
   };
 
@@ -156,6 +221,18 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
                   if (e.key === 'Enter') handleGenerate();
                 }}
               />
+              <button
+                className={`${isRecording ? 'bg-red-600 animate-pulse' : 'bg-gray-600 hover:bg-gray-700'} disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 select-none touch-none`}
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onMouseLeave={stopRecording}
+                onTouchStart={startRecording}
+                onTouchEnd={stopRecording}
+                disabled={processingState !== 'idle'}
+                title="Hold to Speak"
+              >
+                <Mic className="w-5 h-5" />
+              </button>
               <button 
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2"
                 onClick={handleGenerate}
