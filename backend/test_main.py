@@ -118,4 +118,35 @@ def test_run_blender_success(mock_execute, client, test_bvh_id):
     data = response.json()
     assert "id" in data
     
+def test_batch_process_success(mock_chat, client):
+    mock_response = AsyncMock()
+    mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
+    mock_chat.send_message_async.return_value = mock_response
 
+    content = b"HIERARCHY\nROOT Hips\n{\n}"
+    
+    with patch("main.execute_blender_script") as mock_execute:
+        def side_effect(input_bvh, script_code, upload_dir, temp_id):
+            final_path = os.path.join(upload_dir, f"{temp_id}.bvh")
+            with open(final_path, "w") as f:
+                f.write("OUTPUT")
+            return final_path
+        mock_execute.side_effect = side_effect
+        
+        files = [
+            ("files", ("test1.bvh", content, "application/octet-stream")),
+            ("files", ("test2.bvh", content, "application/octet-stream"))
+        ]
+        response = client.post("/batch_process", data={"prompt": "test prompt"}, files=files)
+        
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/zip"
+
+def test_batch_process_exceed_limit(client):
+    content = b"HIERARCHY\nROOT Hips\n{\n}"
+    files = [("files", (f"test{i}.bvh", content, "application/octet-stream")) for i in range(6)]
+    
+    response = client.post("/batch_process", data={"prompt": "test prompt"}, files=files)
+    
+    assert response.status_code == 400
+    assert "exceeded" in response.json()["detail"].lower()

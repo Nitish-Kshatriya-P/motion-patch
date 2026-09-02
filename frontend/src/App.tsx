@@ -1,16 +1,39 @@
 import { useState } from 'react';
 import UploadForm from './components/UploadForm';
 import Viewer from './components/Viewer';
+import BatchProcessor from './components/BatchProcessor';
 
 function App() {
   const [bvhId, setBvhId] = useState<string | null>(null);
+  const [isBatchMode, setIsBatchMode] = useState(false);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center p-8">
-      <h1 className="text-3xl font-bold mb-8 text-gray-800">Hello World Mocap Viewer</h1>
+      <h1 className="text-3xl font-bold mb-4 text-gray-800">Hello World Mocap Viewer</h1>
+      
+      {!bvhId && (
+        <div className="mb-6 flex space-x-4 bg-gray-200 p-1 rounded-lg">
+          <button 
+            className={`px-4 py-2 rounded-md font-medium transition-colors ${!isBatchMode ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-300'}`}
+            onClick={() => setIsBatchMode(false)}
+          >
+            Single File Mode
+          </button>
+          <button 
+            className={`px-4 py-2 rounded-md font-medium transition-colors ${isBatchMode ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-300'}`}
+            onClick={() => setIsBatchMode(true)}
+          >
+            Batch Mode
+          </button>
+        </div>
+      )}
       
       {!bvhId ? (
-        <UploadForm onUploadSuccess={setBvhId} />
+        isBatchMode ? (
+          <BatchProcessor />
+        ) : (
+          <UploadForm onUploadSuccess={setBvhId} />
+        )
       ) : (
         <div className="w-full max-w-[1600px] h-[800px] bg-black rounded-lg overflow-hidden relative shadow-xl">
           <Viewer bvhId={bvhId} onBvhUpdate={setBvhId} />

@@ -131,3 +131,84 @@ async def run_blender(request: RunCodeRequest):
         raise HTTPException(status_code=500, detail=str(e))
         
     return {"id": temp_output_id}
+
+from typing import List
+import zipfile
+import asyncio
+
+@app.post("/batch_process")
+async def batch_process(
+    files: List[UploadFile] = File(...),
+    prompt: Optional[str] = Form(""),
+    audio: Optional[UploadFile] = File(None)
+):
+    if len(files) > 5:
+        raise HTTPException(status_code=400, detail="Batch size limit exceeded. Maximum 5 files allowed.")
+    
+    prompt = prompt.strip() if prompt else ""
+    if not prompt and not audio:
+        raise HTTPException(status_code=400, detail="Must provide either a prompt or audio instructions")
+
+    bvh_files_info = []
+    first_bvh_hierarchy = ""
+    for idx, file in enumerate(files):
+        if not file.filename.lower().endswith('.bvh'):
+            raise HTTPException(status_code=400, detail=f"Invalid file extension for {file.filename}.")
+        
+        content = await file.read()
+        if not validate_bvh(content):
+            raise HTTPException(status_code=400, detail=f"Invalid BVH file structure in {file.filename}.")
+            
+        file_id = str(uuid.uuid4())
+        file_path = os.path.join(UPLOAD_DIR, f"{file_id}.bvh")
+        
+        with open(file_path, "wb") as f:
+            f.write(content)
+            
+        if idx == 0:
+            first_bvh_hierarchy = BVHFile(content.decode("utf-8", errors="ignore")).hierarchy
+            
+        bvh_files_info.append({"id": file_id, "original_name": file.filename, "path": file_path})
+
+    audio_data = None
+    if audio:
+        content = await audio.read()
+        if content:
+            audio_data = AudioPayload(content, audio.content_type)
+            
+    try:
+        script_code = await generate_blender_script(prompt, first_bvh_hierarchy, audio_data)
+        logger.info(f"Generated Batch Agent Code:\n{script_code}")
+    except Exception as e:
+        logger.error(f"Agent code generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Agent code generation failed: {str(e)}")
+
+    processed_files = []
+    
+    async def process_file(file_info):
+        temp_output_id = str(uuid.uuid4())
+        try:
+            output_path = await asyncio.to_thread(
+                execute_blender_script, 
+                file_info["path"], 
+                script_code, 
+                UPLOAD_DIR, 
+                temp_output_id
+            )
+            processed_files.append({"original_name": file_info["original_name"], "output_path": output_path})
+        except Exception as e:
+            logger.error(f"Failed to process {file_info['original_name']}: {e}")
+
+    await asyncio.gather(*(process_file(info) for info in bvh_files_info))
+
+    if not processed_files:
+        raise HTTPException(status_code=500, detail="All files failed processing.")
+
+    batch_id = str(uuid.uuid4())
+    zip_path = os.path.join(UPLOAD_DIR, f"batch_{batch_id}.zip")
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for pfile in processed_files:
+            zipf.write(pfile["output_path"], arcname=f"fixed_{pfile['original_name']}")
+
+    return FileResponse(zip_path, media_type="application/zip", filename="batch_results.zip")
