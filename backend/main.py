@@ -96,14 +96,12 @@ async def generate_code(
     with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
         bvh_file = BVHFile(f.read())
 
-    audio_bytes = None
-    audio_mime_type = None
+    audio_data = None
     if audio:
-        audio_bytes = await audio.read()
-        audio_mime_type = audio.content_type
+        audio_data = (await audio.read(), audio.content_type)
 
     try:
-        script_code = await generate_blender_script(prompt, bvh_file.hierarchy, audio_bytes, audio_mime_type)
+        script_code = await generate_blender_script(prompt, bvh_file.hierarchy, audio_data)
         logger.info(f"Generated Agent Code:\n{script_code}")
     except Exception as e:
         logger.error(f"Agent code generation failed: {e}")

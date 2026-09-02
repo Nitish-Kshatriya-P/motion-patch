@@ -60,7 +60,7 @@ async def cleanup_mcp():
     if _mcp_client_ctx:
         await _mcp_client_ctx.__aexit__(None, None, None)
 
-async def generate_blender_script(prompt: str, hierarchy_only: str, audio_bytes: bytes = None, audio_mime_type: str = None) -> str:
+async def generate_blender_script(prompt: str, hierarchy_only: str, audio_data: tuple[bytes, str] = None) -> str:
     boilerplate_guidelines = BLENDER_BOILERPLATE.format(fix_logic="- Perform the user's requested modifications using the Blender API on the armature and its bones.").split('\n')
     boilerplate_guidelines_str = "\n".join([f"- {line}" for line in boilerplate_guidelines])
     
@@ -77,10 +77,13 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio_bytes:
     )
     
     contents = []
-    text_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```\n\nUser Request: {prompt}"
+    text_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```"
+    if prompt:
+        text_prompt += f"\n\nUser Request: {prompt}"
     contents.append(text_prompt)
-    if audio_bytes and audio_mime_type:
-        contents.append(Part.from_data(data=audio_bytes, mime_type=audio_mime_type))
+    
+    if audio_data:
+        contents.append(Part.from_data(data=audio_data[0], mime_type=audio_data[1]))
 
     init_vertexai()
     
@@ -94,7 +97,7 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio_bytes:
     )])
     
     model = GenerativeModel(
-        model_name="gemini-1.5-pro",
+        model_name="gemini-2.5-pro",
         system_instruction=system_instruction,
         tools=[rag_tool]
     )

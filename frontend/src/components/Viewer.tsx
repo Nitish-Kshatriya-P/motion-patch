@@ -68,8 +68,7 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
 
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return;
+  const submitGeneration = async (audioBlob?: Blob) => {
     setError(null);
     setProcessingState('generating_code');
 
@@ -77,13 +76,12 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       const formData = new FormData();
       formData.append('bvh_id', bvhId);
       formData.append('prompt', prompt);
+      if (audioBlob) {
+        formData.append('audio', audioBlob, 'recording.webm');
+      }
 
-      const genRes = await axios.post('http://localhost:8000/generate_code', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      const code = genRes.data.code;
-      
-      setScriptCode(code);
+      const genRes = await axios.post('http://localhost:8000/generate_code', formData);
+      setScriptCode(genRes.data.code);
       setProcessingState('editing_code');
     } catch (err: any) {
       console.error(err);
@@ -92,28 +90,9 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
     }
   };
 
-  const handleGenerateAudio = async (audioBlob: Blob) => {
-    setError(null);
-    setProcessingState('generating_code');
-
-    try {
-      const formData = new FormData();
-      formData.append('bvh_id', bvhId);
-      formData.append('prompt', prompt);
-      formData.append('audio', audioBlob, 'recording.webm');
-      
-      const genRes = await axios.post('http://localhost:8000/generate_code', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      const code = genRes.data.code;
-      
-      setScriptCode(code);
-      setProcessingState('editing_code');
-    } catch (err: any) {
-      console.error(err);
-      setError(extractError(err));
-      setProcessingState('idle');
-    }
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return;
+    await submitGeneration();
   };
 
   const startRecording = async () => {
@@ -130,7 +109,7 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       recorder.onstop = () => {
         const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
         stream.getTracks().forEach(track => track.stop());
-        handleGenerateAudio(blob);
+        submitGeneration(blob);
       };
       
       recorder.start();
