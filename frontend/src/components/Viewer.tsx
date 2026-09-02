@@ -7,6 +7,7 @@ import axios from 'axios';
 import { Loader2, Send, Play, Mic } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { extractError } from '../utils';
+import HoldToSpeakButton from './HoldToSpeakButton';
 
 function BvhModel({ url }: { url: string }) {
   const bvh = useLoader(BVHLoader as any, url);
@@ -56,67 +57,6 @@ function Loader() {
   );
 }
 
-function HoldToSpeakButton({ onRecordingComplete, onError, disabled }: { onRecordingComplete: (blob: Blob) => void, onError: (msg: string) => void, disabled: boolean }) {
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const audioChunks = useRef<Blob[]>([]);
-  const isIntentRecording = useRef(false);
-
-  const startRecording = async () => {
-    isIntentRecording.current = true;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!isIntentRecording.current) {
-        stream.getTracks().forEach(track => track.stop());
-        onError("Hold the button longer to record audio.");
-        return;
-      }
-      const recorder = new MediaRecorder(stream);
-      mediaRecorder.current = recorder;
-      audioChunks.current = [];
-      
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunks.current.push(e.data);
-      };
-      
-      recorder.onstop = () => {
-        const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
-        stream.getTracks().forEach(track => track.stop());
-        if (blob.size > 0) onRecordingComplete(blob);
-      };
-      
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Error accessing microphone", err);
-      onError("Microphone access denied or not available");
-    }
-  };
-
-  const stopRecording = () => {
-    isIntentRecording.current = false;
-    if (mediaRecorder.current && isRecording) {
-      mediaRecorder.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  return (
-    <button
-      className={`${isRecording ? 'bg-red-600 animate-pulse' : 'bg-gray-600 hover:bg-gray-700'} disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 select-none touch-none`}
-      onMouseDown={startRecording}
-      onMouseUp={stopRecording}
-      onMouseLeave={stopRecording}
-      onTouchStart={startRecording}
-      onTouchEnd={stopRecording}
-      disabled={disabled}
-      title="Hold to Speak"
-    >
-      <Mic className="w-5 h-5" />
-    </button>
-  );
-}
-
 export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpdate?: (id: string) => void }) {
   const [timestamp, setTimestamp] = useState(() => Date.now());
   const url = `http://localhost:8000/bvh/${bvhId}?t=${timestamp}`;
@@ -127,6 +67,10 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
   const [scriptCode, setScriptCode] = useState<string>("");
 
   const submitGeneration = async (audioBlob?: Blob) => {
+    if (!prompt.trim() && !audioBlob) {
+      setError("Please provide a prompt or audio instructions.");
+      return;
+    }
     setError(null);
     setProcessingState('generating_code');
 
@@ -146,11 +90,6 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       setError(extractError(err));
       setProcessingState('idle');
     }
-  };
-
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return;
-    await submitGeneration();
   };
 
   const handleExecute = async () => {
@@ -223,13 +162,28 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
                 onChange={e => setPrompt(e.target.value)}
                 disabled={processingState !== 'idle'}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') handleGenerate();
+                  if (e.key === 'Enter') submitGeneration();
                 }}
               />
               <HoldToSpeakButton onRecordingComplete={submitGeneration} onError={setError} disabled={processingState !== 'idle'} />
+              <label className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 cursor-pointer flex items-center justify-center shrink-0">
+                <input 
+                  type="file" 
+                  accept=".mp3,.webm,.mpeg"
+                  hidden 
+                  disabled={processingState !== 'idle'}
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      submitGeneration(e.target.files[0]);
+                    }
+                    e.target.value = '';
+                  }}
+                />
+                <span className="text-xs font-semibold px-1">MP3</span>
+              </label>
               <button 
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2"
-                onClick={handleGenerate}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 shrink-0"
+                onClick={() => submitGeneration()}
                 disabled={!prompt.trim() || processingState !== 'idle'}
               >
                 <Send className="w-5 h-5" />

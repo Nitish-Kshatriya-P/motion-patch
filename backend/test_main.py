@@ -84,6 +84,20 @@ def test_generate_code_error(mock_chat, client, test_bvh_id):
         assert response.status_code == 500
         assert "Agent code generation failed" in response.json()["detail"]
 
+def test_generate_code_empty_input(client, test_bvh_id):
+    response = client.post("/generate_code", data={"prompt": "", "bvh_id": test_bvh_id})
+    assert response.status_code == 400
+    assert "Must provide either a prompt or audio" in response.json()["detail"]
+
+def test_generate_code_mp3_audio(mock_chat, client, test_bvh_id):
+    mock_response = AsyncMock()
+    mock_response.text = "```python\nimport bpy\nprint('mp3 code')\n```"
+    mock_chat.send_message_async.return_value = mock_response
+
+    response = client.post("/generate_code", data={"bvh_id": test_bvh_id}, files={"audio": ("test.mp3", b"mp3_data", "audio/mp3")})
+    assert response.status_code == 200
+    assert response.json()["code"] == "import bpy\nprint('mp3 code')"
+
 @patch("main.execute_blender_script")
 def test_run_blender_success(mock_execute, client, test_bvh_id):
     def side_effect(input_bvh, script_code, upload_dir, temp_id):

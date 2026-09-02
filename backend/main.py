@@ -90,7 +90,11 @@ async def generate_code(
     prompt: Optional[str] = Form(""),
     audio: Optional[UploadFile] = File(None)
 ):
-    if audio and not audio.content_type.startswith("audio/"):
+    prompt = prompt.strip() if prompt else ""
+    if not prompt and not audio:
+        raise HTTPException(status_code=400, detail="Must provide either a prompt or audio instructions")
+
+    if audio and (not audio.content_type or not audio.content_type.startswith("audio/")):
         raise HTTPException(status_code=400, detail="Invalid audio format")
 
     logger.info(f"Generating code for prompt: {prompt}")
