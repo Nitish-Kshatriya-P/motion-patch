@@ -62,6 +62,11 @@ def mock_chat():
     with patch("agent.GenerativeModel") as mock_model_class:
         chat = AsyncMock()
         mock_model_class.return_value.start_chat.return_value = chat
+        
+        mock_resp = MagicMock()
+        mock_resp.text = "PASS"
+        mock_model_class.return_value.generate_content_async = AsyncMock(return_value=mock_resp)
+        
         yield chat
 
 def test_generate_code_success(mock_chat, client, test_bvh_id):
