@@ -4,53 +4,61 @@ import zipfile
 import asyncio
 import logging
 from typing import Dict
-from models import BatchJob, Status, BatchFile
+from models import BatchJob, Status, BatchFile, ExecutionParams
 from agent import generate_blender_script
 from blender import execute_blender_script
 
 logger = logging.getLogger(__name__)
 BATCH_JOBS: Dict[str, BatchJob] = {}
 
-async def dispatch_cloud_run_job(input_path: str, script_code: str, temp_id: str, upload_dir: str) -> str:
+async def dispatch_cloud_run_job(params: ExecutionParams) -> str:
     try:
         from google.cloud import run_v2
         client = run_v2.JobsClient()
-        request = run_v2.RunJobRequest(name="projects/dummy-project/locations/us-central1/jobs/headless-blender")
-        client.run_job(request=request)
-        return os.path.join(upload_dir, f"{temp_id}.bvh")
+        overrides = run_v2.RunJobRequest.Overrides(
+            container_overrides=[
+                run_v2.RunJobRequest.Overrides.ContainerOverride(
+                    env=[
+                        run_v2.EnvVar(name="SCRIPT_CODE", value=params.script_code),
+                        run_v2.EnvVar(name="INPUT_BVH", value=params.input_bvh_path)
+                    ]
+                )
+            ]
+        )
+        request = run_v2.RunJobRequest(
+            name="projects/dummy-project/locations/us-central1/jobs/headless-blender",
+            overrides=overrides
+        )
+        operation = client.run_job(request=request)
+        operation.result()
+        return os.path.join(params.upload_dir, f"{params.temp_output_id}.bvh")
     except Exception as e:
         logger.info(f"Falling back to local execution: {e}")
-        return await asyncio.to_thread(
-            execute_blender_script, 
-            input_path, 
-            script_code, 
-            upload_dir, 
-            temp_id
-        )
+        return await asyncio.to_thread(execute_blender_script, params)
 
-async def process_batch_file(file_info, instruction, bvh_content, upload_dir):
+async def process_batch_file(file_info: BatchFile, instruction, bvh_content, upload_dir):
     try:
-        file_info.status = Status.GENERATING_SCRIPT
+        file_info.transition_to(Status.GENERATING_SCRIPT)
         script_code = await generate_blender_script(bvh_content, instruction)
         
-        file_info.status = Status.RUNNING_JOB
+        file_info.transition_to(Status.RUNNING_JOB)
         temp_id = file_info.id + "_out"
-        output_path = await dispatch_cloud_run_job(
-            file_info.path,
-            script_code,
-            temp_id,
-            upload_dir
+        params = ExecutionParams(
+            input_bvh_path=file_info.path,
+            script_code=script_code,
+            upload_dir=upload_dir,
+            temp_output_id=temp_id
         )
+        output_path = await dispatch_cloud_run_job(params)
         
-        file_info.output_path = output_path
-        file_info.status = Status.COMPLETED
+        file_info.transition_to(Status.COMPLETED, output_path)
         return True
     except Exception as e:
         logger.error(f"Error processing {file_info.original_name}: {e}")
-        file_info.status = Status.FAILED
+        file_info.transition_to(Status.FAILED)
         return False
 
-async def run_batch_background(batch_id: str, bvh_files: list[BatchFile], instruction, upload_dir: str):
+async def run_batch_background(batch_id: str, instruction, upload_dir: str):
     from bvh_parser import BVHFile
     
     batch = BATCH_JOBS[batch_id]

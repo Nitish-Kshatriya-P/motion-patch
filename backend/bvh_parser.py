@@ -8,11 +8,6 @@ logger = logging.getLogger(__name__)
 class BVHFile:
     def __init__(self, content: str):
         self.content = content
-        # We preserve the full content to resolve the "BVH Motion Block Stripped" bug,
-        # but we also expose hierarchy for quick reference if needed.
-        parts = content.split("MOTION")
-        self.hierarchy = parts[0].strip()
-        self.motion = parts[1].strip() if len(parts) > 1 else ""
 
 def validate_bvh(content: bytes) -> bool:
     try:

@@ -75,6 +75,15 @@ def validate_script_ast(script_code: str) -> str:
         
     return ""
 
+def validate_physical_constraints(script_code: str, expert_type: ExpertType) -> str:
+    if expert_type == ExpertType.CONTACT:
+        if "ik" not in script_code.lower() and "constraint" not in script_code.lower():
+            return "Physical Constraint Error: Contact expert must implement IK or constraints to prevent foot sliding."
+    elif expert_type == ExpertType.KINEMATICS:
+        if "fcurve" not in script_code.lower() and "filter" not in script_code.lower() and "smooth" not in script_code.lower():
+            return "Physical Constraint Error: Kinematics expert must apply smoothing or filtering to fcurves."
+    return ""
+
 from enum import Enum
 
 class ExpertType(str, Enum):
@@ -113,32 +122,38 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
         
     logger.info(f"Supervisor routed to: {expert_type.value}")
     
-    expert_guidelines = (
-        "- For Contact logic: Use inverse kinematics (IK) or constraint baking to firmly pin bones (e.g., feet) above z=0."
-    ) if expert_type == ExpertType.CONTACT else (
-        "- For Kinematics logic: Use fcurve smoothing, Euler filtering, or low-pass filters to remove jitter."
-    )
-    
-    expert_instruction = (
-        "You are an expert Blender Python developer for motion capture cleanup.\n"
-        f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE}\n"
-        f"Guidelines:\n{expert_guidelines}\n"
-        "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
-        "Your only output should be the raw python code enclosed in ```python ``` tags."
-    )
-    
-    expert = Agent(
-        name="Worker",
-        instruction=expert_instruction,
-        model="gemini-1.5-pro",
-        tools=[query_clickhouse_rag]
-    )
+    if expert_type == ExpertType.CONTACT:
+        expert = Agent(
+            name="Contact Worker",
+            instruction=(
+                "You are an expert Blender Python developer for motion capture cleanup.\n"
+                f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE}\n"
+                "Guidelines: Use inverse kinematics (IK) or constraint baking to firmly pin bones (e.g., feet) above z=0.\n"
+                "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
+                "Your only output should be the raw python code enclosed in ```python ``` tags."
+            ),
+            model="gemini-1.5-pro",
+            tools=[query_clickhouse_rag]
+        )
+    else:
+        expert = Agent(
+            name="Kinematics Worker",
+            instruction=(
+                "You are an expert Blender Python developer for motion capture cleanup.\n"
+                f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE}\n"
+                "Guidelines: Use fcurve smoothing, Euler filtering, or low-pass filters to remove jitter.\n"
+                "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
+                "Your only output should be the raw python code enclosed in ```python ``` tags."
+            ),
+            model="gemini-1.5-pro",
+            tools=[query_clickhouse_rag]
+        )
     
     expert_runner = Runner(agent=expert)
     
     text_prompt = f"Original BVH File:\n```bvh\n{bvh_content}\n```"
-    if prompt:
-        text_prompt += f"\n\nUser Request: {prompt}"
+    if instruction_payload.prompt:
+        text_prompt += f"\n\nUser Request: {instruction_payload.prompt}"
         
     req_contents = []
     if instruction_payload and instruction_payload.audio_data:
@@ -168,8 +183,11 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
         script_code = extract_code(response_text)
         
         ast_error = validate_script_ast(script_code)
+        constraint_error = validate_physical_constraints(script_code, expert_type)
         if ast_error:
             qa_result = f"FAIL: {ast_error}"
+        elif constraint_error:
+            qa_result = f"FAIL: {constraint_error}"
         else:
             qa_events = await qa_runner.run_debug([f"Evaluate this script:\n```python\n{script_code}\n```"])
             qa_result = qa_events[-1].output.text.strip() if qa_events else "FAIL"

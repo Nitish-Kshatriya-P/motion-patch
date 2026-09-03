@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Upload, AlertCircle, Loader2, Send, FileCode, CheckCircle, Download, Clock, PlayCircle } from 'lucide-react';
 import { extractError, getAudioExtension } from '../utils';
-import HoldToSpeakButton from './HoldToSpeakButton';
+
 
 interface BatchFileStatus {
   id: string;
@@ -13,7 +13,7 @@ interface BatchFileStatus {
 export default function BatchProcessor() {
   const [files, setFiles] = useState<File[]>([]);
   const [prompt, setPrompt] = useState("");
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+
   
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<string | null>(null);
@@ -62,16 +62,12 @@ export default function BatchProcessor() {
 
   const handleSubmit = async () => {
     if (files.length === 0) return setError("Please select at least one BVH file.");
-    if (!prompt.trim() && !audioBlob) return setError("Please provide a text prompt or record an audio note.");
+    if (!prompt.trim()) return setError("Please provide a text prompt.");
     
     setError(null);
     const formData = new FormData();
     files.forEach(f => formData.append('files', f));
     formData.append('prompt', prompt);
-    if (audioBlob) {
-      const ext = getAudioExtension(audioBlob);
-      formData.append('audio', audioBlob, `batch_recording.${ext}`);
-    }
 
     try {
       const res = await axios.post('http://localhost:8000/batch_process', formData, {
@@ -137,7 +133,6 @@ export default function BatchProcessor() {
                 onChange={e => setPrompt(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSubmit()}
               />
-              <HoldToSpeakButton onRecordingComplete={setAudioBlob} onError={setError} disabled={false} />
             </div>
           </div>
 
@@ -150,7 +145,7 @@ export default function BatchProcessor() {
 
           <button
             onClick={handleSubmit}
-            disabled={files.length === 0 || (!prompt.trim() && !audioBlob)}
+            disabled={files.length === 0 || !prompt.trim()}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 rounded-lg shadow-sm transition-colors flex justify-center items-center gap-2"
           >
             <Send className="w-5 h-5" /> Run Batch Processing

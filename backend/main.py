@@ -148,9 +148,13 @@ async def batch_process(
 
     BATCH_JOBS[batch_id] = BatchJob(batch_id=batch_id, files=batch_files)
     
-    background_tasks.add_task(run_batch_background, batch_id, batch_files, instruction, UPLOAD_DIR)
+    background_tasks.add_task(run_batch_background, batch_id, instruction, UPLOAD_DIR)
     
-    return {"batch_id": batch_id, "message": "Batch processing started"}
+    return {
+        "batch_id": batch_id, 
+        "message": "Batch processing started",
+        "files": [{"id": f.id, "original_name": f.original_name, "status": f.status.value} for f in batch_files]
+    }
 
 @app.get("/batch_process/{batch_id}")
 async def get_batch_status(batch_id: str):

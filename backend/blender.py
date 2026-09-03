@@ -5,21 +5,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def execute_blender_script(input_bvh_path: str, script_code: str, upload_dir: str, temp_output_id: str) -> str:
-    temp_dir = os.path.join(upload_dir, temp_output_id)
+from models import ExecutionParams
+
+def execute_blender_script(params: ExecutionParams) -> str:
+    temp_dir = os.path.join(params.upload_dir, params.temp_output_id)
     os.makedirs(temp_dir, exist_ok=True)
     
     workspace_input = os.path.join(temp_dir, "input.bvh")
     workspace_output = os.path.join(temp_dir, "output.bvh")
     workspace_script = os.path.join(temp_dir, "script.py")
     
-    shutil.copyfile(input_bvh_path, workspace_input)
+    shutil.copyfile(params.input_bvh_path, workspace_input)
     with open(workspace_script, "w", encoding="utf-8") as f:
-        f.write(script_code)
+        f.write(params.script_code)
         
     logger.info("Starting sandboxed Blender execution...")
     mount_path = os.path.abspath(temp_dir).replace("\\", "/")
-    container_name = f"blender_{temp_output_id}"
+    container_name = f"blender_{params.temp_output_id}"
     
     try:
         cmd = [
@@ -45,7 +47,7 @@ def execute_blender_script(input_bvh_path: str, script_code: str, upload_dir: st
         logger.error("Blender executed but output.bvh was not created.")
         raise RuntimeError("Output BVH not generated.")
         
-    final_output_path = os.path.join(upload_dir, f"{temp_output_id}.bvh")
+    final_output_path = os.path.join(params.upload_dir, f"{params.temp_output_id}.bvh")
     shutil.copyfile(workspace_output, final_output_path)
     shutil.rmtree(temp_dir, ignore_errors=True)
     
