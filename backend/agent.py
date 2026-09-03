@@ -101,9 +101,7 @@ def validate_physical_constraints(script_code: str, expert_type: ExpertType) -> 
             return "Physical Constraint Error: Contact expert must implement IK or constraints to prevent foot sliding."
     elif expert_type == ExpertType.KINEMATICS:
         if "bpy.ops.graph" in script_code or "bpy.ops.action" in script_code:
-            return "Context Error: Do not use bpy.ops.graph.* or bpy.ops.action.* in headless mode. Modify fcurve.keyframe_points directly."
-        if "fcurve" not in script_code.lower() and "filter" not in script_code.lower() and "smooth" not in script_code.lower():
-            return "Physical Constraint Error: Kinematics expert must apply smoothing or filtering to fcurves."
+            return "Context Error: Do not use bpy.ops.graph.* or bpy.ops.action.* in headless mode."
     return ""
 
 from enum import Enum
@@ -163,9 +161,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
             instruction=(
                 "You are an expert Blender Python developer for motion capture cleanup.\n"
                 f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
-                "Guidelines: Use fcurve smoothing, Euler filtering, or low-pass filters to remove jitter.\n"
-                "CRITICAL: Do NOT use bpy.ops.graph.* or bpy.ops.action.* as they require UI context. Modify fcurve.keyframe_points directly.\n"
-                "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
+                "CRITICAL: Do NOT use bpy.ops.graph.* or bpy.ops.action.* as they require UI context. Modify fcurve.keyframe_points or NLA strips directly.\n"
                 "Your only output should be the raw python code enclosed in ```python ``` tags."
             ),
             model=VertexGemini(model="gemini-2.5-flash"),
