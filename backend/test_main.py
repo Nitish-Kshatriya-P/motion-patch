@@ -75,7 +75,7 @@ def empty_audio():
 
 def test_generate_code_success(mock_chat, client, test_bvh_id, empty_audio):
     mock_response = AsyncMock()
-    mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
+    mock_response.text = "```python\nimport bpy\nprint('hello')\nwith open('/workspace/output.bvh', 'w') as f: pass\n```"
     mock_chat.send_message_async.return_value = mock_response
 
     response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files=empty_audio)
@@ -83,7 +83,7 @@ def test_generate_code_success(mock_chat, client, test_bvh_id, empty_audio):
     assert response.status_code == 200
     data = response.json()
     assert "code" in data
-    assert data["code"] == "import bpy\nprint('hello')"
+    assert data["code"] == "import bpy\nprint('hello')\nwith open('/workspace/output.bvh', 'w') as f: pass"
 
 def test_generate_code_error(mock_chat, client, test_bvh_id, empty_audio):
     with patch("main.generate_blender_script") as mock_gen:
@@ -100,12 +100,12 @@ def test_generate_code_empty_input(client, test_bvh_id):
 
 def test_generate_code_mp3_audio(mock_chat, client, test_bvh_id):
     mock_response = AsyncMock()
-    mock_response.text = "```python\nimport bpy\nprint('mp3 code')\n```"
+    mock_response.text = "```python\nimport bpy\nprint('mp3 code')\nwith open('/workspace/output.bvh', 'w') as f: pass\n```"
     mock_chat.send_message_async.return_value = mock_response
 
     response = client.post("/generate_code", data={"bvh_id": test_bvh_id}, files={"audio": ("test.mp3", b"mp3_data", "audio/mp3")})
     assert response.status_code == 200
-    assert response.json()["code"] == "import bpy\nprint('mp3 code')"
+    assert response.json()["code"] == "import bpy\nprint('mp3 code')\nwith open('/workspace/output.bvh', 'w') as f: pass"
 
 @patch("main.execute_blender_script")
 def test_run_blender_success(mock_execute, client, test_bvh_id):
@@ -124,7 +124,7 @@ def test_run_blender_success(mock_execute, client, test_bvh_id):
     
 def test_batch_process_success(mock_chat, client):
     mock_response = AsyncMock()
-    mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
+    mock_response.text = "```python\nimport bpy\nprint('hello')\nwith open('/workspace/output.bvh', 'w') as f: pass\n```"
     mock_chat.send_message_async.return_value = mock_response
 
     content = b"HIERARCHY\nROOT Hips\n{\n}"
