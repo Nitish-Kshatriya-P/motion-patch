@@ -3,7 +3,8 @@ import sys
 import asyncio
 import logging
 import ast
-from google.adk import Agent, Runner
+from google.adk import Agent
+from google.adk.runners import InMemoryRunner
 from google.genai import types
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
@@ -111,7 +112,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
         model="gemini-3.7-flash"
     )
     
-    runner = Runner(agent=supervisor)
+    runner = InMemoryRunner(agent=supervisor)
     sup_contents = [f"User Request: {instruction_payload.prompt}"]
     if instruction_payload and instruction_payload.audio_data:
         sup_contents.append(types.Part.from_bytes(data=instruction_payload.audio_data, mime_type=instruction_payload.audio_mime))
@@ -149,7 +150,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
             tools=[query_clickhouse_rag]
         )
     
-    expert_runner = Runner(agent=expert)
+    expert_runner = InMemoryRunner(agent=expert)
     
     text_prompt = f"Original BVH File:\n```bvh\n{bvh_content}\n```"
     if instruction_payload.prompt:
@@ -174,7 +175,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
         instruction=qa_prompt,
         model="gemini-3.7-flash"
     )
-    qa_runner = Runner(agent=qa_agent)
+    qa_runner = InMemoryRunner(agent=qa_agent)
     
     for attempt in range(max_attempts):
         logger.info(f"Expert Agent generating code (Attempt {attempt+1}/{max_attempts})...")
