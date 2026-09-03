@@ -152,7 +152,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
                 "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
                 "Your only output should be the raw python code enclosed in ```python ``` tags."
             ),
-            model=VertexGemini(model="gemini-1.5-pro"),
+            model=VertexGemini(model="gemini-2.5-flash"),
             tools=[query_clickhouse_rag]
         )
     else:
@@ -165,7 +165,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
                 "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
                 "Your only output should be the raw python code enclosed in ```python ``` tags."
             ),
-            model=VertexGemini(model="gemini-1.5-pro"),
+            model=VertexGemini(model="gemini-2.5-flash"),
             tools=[query_clickhouse_rag]
         )
     
