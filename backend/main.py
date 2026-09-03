@@ -67,6 +67,13 @@ async def upload(file: UploadFile = File(...)):
     file_id, _ = result
     return {"id": file_id, "message": "File uploaded successfully"}
 
+from fastapi.responses import FileResponse
+
+@app.get("/bvh/{bvh_id}")
+async def get_bvh(bvh_id: str):
+    bvh_path = get_valid_bvh_path(bvh_id)
+    return FileResponse(bvh_path, media_type="application/octet-stream")
+
 @app.post("/generate_code")
 async def generate_code(
     bvh_id: str = Form(...),
@@ -80,34 +87,37 @@ async def generate_code(
         bvh_file = BVHFile(f.read())
 
     try:
-        # Pass the full BVH content!
-        script_code = await generate_blender_script(instruction.prompt, bvh_file.content, instruction)
+        script_code = await generate_blender_script(bvh_file.content, instruction)
         logger.info(f"Generated Agent Code:\n{script_code}")
         return {"code": script_code}
     except Exception as e:
         logger.error(f"Agent failed to generate code: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+from pydantic import BaseModel
+class RunBlenderRequest(BaseModel):
+    bvh_id: str
+    script_code: str
+
 @app.post("/run_blender")
-async def run_blender(
-    bvh_id: str = Form(...),
-    script_code: str = Form(...)
-):
-    bvh_path = get_valid_bvh_path(bvh_id)
+async def run_blender(req: RunBlenderRequest):
+    bvh_path = get_valid_bvh_path(req.bvh_id)
     
     try:
         output_path = await asyncio.to_thread(
             execute_blender_script, 
             bvh_path, 
-            script_code, 
+            req.script_code, 
             UPLOAD_DIR, 
-            bvh_id
+            req.bvh_id
         )
         
-        with open(output_path, "r", encoding="utf-8", errors="ignore") as f:
-            processed_bvh = f.read()
+        import shutil
+        new_id = str(uuid.uuid4())
+        new_path = os.path.join(UPLOAD_DIR, f"{new_id}.bvh")
+        shutil.copyfile(output_path, new_path)
             
-        return {"bvh_content": processed_bvh}
+        return {"id": new_id, "message": "Blender execution successful"}
     except Exception as e:
         logger.error(f"Blender execution failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Blender error: {str(e)}")

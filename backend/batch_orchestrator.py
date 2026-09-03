@@ -28,44 +28,40 @@ async def dispatch_cloud_run_job(input_path: str, script_code: str, temp_id: str
             temp_id
         )
 
+async def process_batch_file(file_info, instruction, bvh_content, upload_dir):
+    try:
+        file_info.status = Status.GENERATING_SCRIPT
+        script_code = await generate_blender_script(bvh_content, instruction)
+        
+        file_info.status = Status.RUNNING_JOB
+        temp_id = file_info.id + "_out"
+        output_path = await dispatch_cloud_run_job(
+            file_info.path,
+            script_code,
+            temp_id,
+            upload_dir
+        )
+        
+        file_info.output_path = output_path
+        file_info.status = Status.COMPLETED
+        return True
+    except Exception as e:
+        logger.error(f"Error processing {file_info.original_name}: {e}")
+        file_info.status = Status.FAILED
+        return False
+
 async def run_batch_background(batch_id: str, bvh_files: list[BatchFile], instruction, upload_dir: str):
     from bvh_parser import BVHFile
     
     batch = BATCH_JOBS[batch_id]
-    any_success = False
-
+    tasks = []
     for file_info in batch.files:
-        try:
-            file_info.status = Status.GENERATING_SCRIPT
-            
-            with open(file_info.path, "r", encoding="utf-8", errors="ignore") as f:
-                bvh_file = BVHFile(f.read())
-
-            script_code = await generate_blender_script(
-                instruction.prompt, 
-                bvh_file.content, # Pass the entire file contents!
-                instruction
-            )
-            
-            file_info.status = Status.RUNNING_JOB
-            
-            temp_id = file_info.id + "_out"
-            output_path = await dispatch_cloud_run_job(
-                file_info.path,
-                script_code,
-                temp_id,
-                upload_dir
-            )
-            
-            file_info.output_path = output_path
-            file_info.status = Status.COMPLETED
-            any_success = True
-            
-        except Exception as e:
-            logger.error(f"Error processing {file_info.original_name}: {e}")
-            file_info.status = Status.FAILED
-
-    batch.status = Status.COMPLETED if any_success else Status.FAILED
+        with open(file_info.path, "r", encoding="utf-8", errors="ignore") as f:
+            bvh_file = BVHFile(f.read())
+        tasks.append(process_batch_file(file_info, instruction, bvh_file.content, upload_dir))
+        
+    results = await asyncio.gather(*tasks)
+    batch.status = Status.COMPLETED if any(results) else Status.FAILED
 
 def create_batch_zip(batch_id: str) -> io.BytesIO:
     batch = BATCH_JOBS.get(batch_id)

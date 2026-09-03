@@ -48,7 +48,6 @@ def extract_code(script_code: str) -> str:
     return script_code
 
 def validate_script_ast(script_code: str) -> str:
-    """Hard-check validation without the unrequested security scope creep."""
     try:
         tree = ast.parse(script_code)
     except SyntaxError as e:
@@ -76,19 +75,23 @@ def validate_script_ast(script_code: str) -> str:
         
     return ""
 
+from enum import Enum
+
+class ExpertType(str, Enum):
+    KINEMATICS = "KINEMATICS"
+    CONTACT = "CONTACT"
+
 async def query_clickhouse_rag(query: str) -> str:
-    """Query ClickHouse for similar past fixes."""
     if not mcp_session:
         return "MCP Session not initialized"
     try:
-        mcp_result = await mcp_session.call_tool("query_past_fixes", arguments={"query": query})
+        mcp_result = await mcp_session.call_tool("query_rag_memory", arguments={"anomaly_query": query})
         text = mcp_result.content[0].text if mcp_result.content else ""
         return text
     except Exception as e:
         return f"Tool call failed: {e}"
 
-async def generate_blender_script(prompt: str, bvh_content: str, instruction_payload) -> str:
-    # 1. Supervisor Agent (Routing)
+async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
     supervisor = Agent(
         name="Supervisor",
         instruction=(
@@ -100,23 +103,19 @@ async def generate_blender_script(prompt: str, bvh_content: str, instruction_pay
     )
     
     runner = Runner(agent=supervisor)
-    sup_contents = [f"User Request: {prompt}"]
+    sup_contents = [f"User Request: {instruction_payload.prompt}"]
     if instruction_payload and instruction_payload.audio_data:
         sup_contents.append(types.Part.from_bytes(data=instruction_payload.audio_data, mime_type=instruction_payload.audio_mime))
         
     events = await runner.run_debug(sup_contents)
-    expert_type = events[-1].output.text.strip().lower() if events else "kinematics"
-    if "contact" in expert_type:
-        expert_type = "contact"
-    else:
-        expert_type = "kinematics"
+    raw_type = events[-1].output.text.strip().upper() if events else "KINEMATICS"
+    expert_type = ExpertType.CONTACT if "CONTACT" in raw_type else ExpertType.KINEMATICS
         
-    logger.info(f"Supervisor routed to: {expert_type.upper()}")
+    logger.info(f"Supervisor routed to: {expert_type.value}")
     
-    # 2. Worker Agent
     expert_guidelines = (
         "- For Contact logic: Use inverse kinematics (IK) or constraint baking to firmly pin bones (e.g., feet) above z=0."
-    ) if expert_type == "contact" else (
+    ) if expert_type == ExpertType.CONTACT else (
         "- For Kinematics logic: Use fcurve smoothing, Euler filtering, or low-pass filters to remove jitter."
     )
     
@@ -124,6 +123,7 @@ async def generate_blender_script(prompt: str, bvh_content: str, instruction_pay
         "You are an expert Blender Python developer for motion capture cleanup.\n"
         f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE}\n"
         f"Guidelines:\n{expert_guidelines}\n"
+        "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
         "Your only output should be the raw python code enclosed in ```python ``` tags."
     )
     
@@ -149,7 +149,6 @@ async def generate_blender_script(prompt: str, bvh_content: str, instruction_pay
         req_contents.append(text_prompt)
 
     max_attempts = 3
-    # 3. QA Judge loop
     qa_prompt = (
         "You are a QA Judge Agent for Blender Python scripts. Evaluate the provided script against basic physical constraints "
         "(e.g., no flying away, smooth transitions, correct bone references). "
