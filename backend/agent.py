@@ -180,9 +180,13 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
         qa_resp = await qa_model.generate_content_async(qa_contents, generation_config={"temperature": 0.0})
         qa_result = qa_resp.text.strip()
         
-        if qa_result.startswith("PASS") or attempt == max_attempts - 1:
+        if qa_result.startswith("PASS"):
             logger.info("QA Judge passed the script.")
             return script_code
+            
+        if attempt == max_attempts - 1:
+            logger.error("QA Judge failed all attempts.")
+            raise RuntimeError("Agent failed to generate a script that passes QA validation.")
         
         logger.info(f"QA Failed: {qa_result}. Retrying...")
         response = await chat.send_message_async(

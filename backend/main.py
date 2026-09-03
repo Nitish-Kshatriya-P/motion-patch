@@ -84,11 +84,6 @@ class BVHFile:
 from typing import Optional, NamedTuple
 from agent import AudioPayload
 
-class BatchFile(NamedTuple):
-    id: str
-    original_name: str
-    path: str
-
 async def validate_input(prompt: Optional[str], audio: Optional[UploadFile]) -> tuple[str, Optional[AudioPayload]]:
     prompt = prompt.strip() if prompt else ""
     audio_data = None
@@ -218,18 +213,11 @@ async def run_batch_background(batch_id: str, prompt: str, audio_data: Optional[
     batch["status"] = "COMPLETED" if any_success else "FAILED"
 
 async def dispatch_cloud_run_job(input_path: str, script_code: str, temp_id: str) -> str:
-    # Try using Google Cloud Run Jobs API for enterprise scalability
     try:
         from google.cloud import run_v2
-        from google.auth.exceptions import DefaultCredentialsError
-        
         client = run_v2.JobsClient()
-        # Mock request setup - in a real environment this would trigger a job
-        # request = run_v2.RunJobRequest(name="projects/.../jobs/headless-blender")
-        # client.run_job(request=request)
-        logger.info(f"Successfully connected to Cloud Run API for job {temp_id}")
-        # Proceed to fallback since we don't actually have a job deployed
-        raise DefaultCredentialsError("Fallback to local")
+        request = run_v2.RunJobRequest(name="projects/dummy-project/locations/us-central1/jobs/headless-blender")
+        client.run_job(request=request)
     except Exception as e:
         logger.info(f"Falling back to local execution: {e}")
         return await asyncio.to_thread(

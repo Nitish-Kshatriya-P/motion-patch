@@ -5,3 +5,7 @@ export const extractError = (err: any): string => {
   if (detail) return JSON.stringify(detail);
   return err.message || "An error occurred";
 };
+
+export const getAudioExtension = (blob: Blob): string => {
+  return blob.type.includes('mp4') ? 'mp4' : 'webm';
+};

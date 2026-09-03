@@ -4,9 +4,10 @@ import { OrbitControls, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js';
 import axios from 'axios';
+import { generateBlenderCode } from '../services/api';
+import { extractError, getAudioExtension } from '../utils';
 import { Loader2, Send, Play, Mic } from 'lucide-react';
 import Editor from '@monaco-editor/react';
-import { extractError } from '../utils';
 import HoldToSpeakButton from './HoldToSpeakButton';
 
 function BvhModel({ url }: { url: string }) {
@@ -80,7 +81,7 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       formData.append('bvh_id', bvhId);
       formData.append('prompt', prompt);
       if (stagedAudio) {
-        const ext = stagedAudio.type.includes('mp4') ? 'mp4' : 'webm';
+        const ext = getAudioExtension(stagedAudio);
         formData.append('audio', stagedAudio, `recording.${ext}`);
       }
 

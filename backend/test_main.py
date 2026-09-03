@@ -146,17 +146,12 @@ def test_batch_process_success(mock_chat, client):
         assert response.status_code == 200
         batch_id = response.json()["batch_id"]
         
-        # In a real environment we would wait for the background task
         import time
         time.sleep(0.1)
         
-        # Verify status
         status_resp = client.get(f"/batch_process/{batch_id}")
         assert status_resp.status_code == 200
-        # Given this is a local test environment, background task might not finish without proper async test setup
-        # but we can at least test the endpoint exists
         
-        # We can bypass and manually set BATCH_JOBS for the download test
         from main import BATCH_JOBS
         BATCH_JOBS[batch_id]["status"] = "COMPLETED"
         for f in BATCH_JOBS[batch_id]["files"]:

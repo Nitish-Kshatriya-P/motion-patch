@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Upload, AlertCircle, Loader2, Send, FileCode, CheckCircle, Download, Clock, PlayCircle } from 'lucide-react';
-import { extractError } from '../utils';
+import { extractError, getAudioExtension } from '../utils';
 import HoldToSpeakButton from './HoldToSpeakButton';
 
 interface BatchFileStatus {
@@ -63,7 +63,7 @@ export default function BatchProcessor() {
     files.forEach(f => formData.append('files', f));
     formData.append('prompt', prompt);
     if (audioBlob) {
-      const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
+      const ext = getAudioExtension(audioBlob);
       formData.append('audio', audioBlob, `batch_recording.${ext}`);
     }
 
