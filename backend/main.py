@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Optional, List
 
 from models import InstructionPayload, BatchJob, BatchFile, Status
-from bvh_parser import BVHFile, save_bvh_file
+from bvh_parser import save_bvh_file
 from batch_orchestrator import run_batch_background, create_batch_zip, BATCH_JOBS
 from agent import init_mcp, cleanup_mcp, generate_blender_script
 from blender import execute_blender_script
