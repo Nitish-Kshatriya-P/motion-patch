@@ -84,10 +84,10 @@ async def generate_code(
     bvh_path = get_valid_bvh_path(bvh_id)
         
     with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
-        bvh_file = BVHFile(f.read())
+        bvh_content = f.read()
 
     try:
-        script_code = await generate_blender_script(bvh_file.content, instruction)
+        script_code = await generate_blender_script(bvh_content, instruction)
         logger.info(f"Generated Agent Code:\n{script_code}")
         return {"code": script_code}
     except Exception as e:
@@ -104,12 +104,16 @@ async def run_blender(req: RunBlenderRequest):
     bvh_path = get_valid_bvh_path(req.bvh_id)
     
     try:
+        from models import ExecutionParams
+        params = ExecutionParams(
+            input_bvh_path=bvh_path,
+            script_code=req.script_code,
+            upload_dir=UPLOAD_DIR,
+            temp_output_id=req.bvh_id
+        )
         output_path = await asyncio.to_thread(
             execute_blender_script, 
-            bvh_path, 
-            req.script_code, 
-            UPLOAD_DIR, 
-            req.bvh_id
+            params
         )
         
         import shutil

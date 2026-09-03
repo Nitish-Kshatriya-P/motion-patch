@@ -21,8 +21,8 @@ function BvhModel({ url }: { url: string }) {
 
   useEffect(() => {
     if (bvh && helper) {
-      const m = new THREE.AnimationMixer(bvh.skeleton.bones[0]);
-      mixer.current = m;
+      const animationMixer = new THREE.AnimationMixer(bvh.skeleton.bones[0]);
+      mixer.current = animationMixer;
       
       const action = m.clipAction(bvh.clip);
       action.play();

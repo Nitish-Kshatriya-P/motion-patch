@@ -59,14 +59,12 @@ async def process_batch_file(file_info: BatchFile, instruction, bvh_content, upl
         return False
 
 async def run_batch_background(batch_id: str, instruction, upload_dir: str):
-    from bvh_parser import BVHFile
-    
     batch = BATCH_JOBS[batch_id]
     tasks = []
     for file_info in batch.files:
         with open(file_info.path, "r", encoding="utf-8", errors="ignore") as f:
-            bvh_file = BVHFile(f.read())
-        tasks.append(process_batch_file(file_info, instruction, bvh_file.content, upload_dir))
+            bvh_content = f.read()
+        tasks.append(process_batch_file(file_info, instruction, bvh_content, upload_dir))
         
     results = await asyncio.gather(*tasks)
     batch.status = Status.COMPLETED if any(results) else Status.FAILED

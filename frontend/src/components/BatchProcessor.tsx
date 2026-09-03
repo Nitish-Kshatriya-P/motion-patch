@@ -4,10 +4,12 @@ import { Upload, AlertCircle, Loader2, Send, FileCode, CheckCircle, Download, Cl
 import { extractError, getAudioExtension } from '../utils';
 
 
+type Status = "PENDING" | "PROCESSING" | "GENERATING_SCRIPT" | "RUNNING_JOB" | "COMPLETED" | "FAILED";
+
 interface BatchFileStatus {
   id: string;
   original_name: string;
-  status: string;
+  status: Status;
 }
 
 export default function BatchProcessor() {
@@ -195,7 +197,7 @@ export default function BatchProcessor() {
                 <Download className="w-5 h-5" /> Download ZIP
               </a>
               <br/>
-              <button onClick={() => { setBatchId(null); setFiles([]); setFileStatuses([]); setPrompt(""); setAudioBlob(null); }} className="mt-6 text-blue-600 hover:underline text-sm font-medium">
+              <button onClick={() => { setBatchId(null); setFiles([]); setFileStatuses([]); setPrompt(""); }} className="mt-6 text-blue-600 hover:underline text-sm font-medium">
                 Process another batch
               </button>
             </div>

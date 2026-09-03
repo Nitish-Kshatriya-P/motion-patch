@@ -5,9 +5,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-class BVHFile:
-    def __init__(self, content: str):
-        self.content = content
+
 
 def validate_bvh(content: bytes) -> bool:
     try:
