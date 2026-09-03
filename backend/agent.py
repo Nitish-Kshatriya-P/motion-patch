@@ -118,7 +118,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
             "and classify the anomaly into one of two categories: 'Kinematics' (e.g. smoothing, jitter, IK) "
             "or 'Contact' (e.g. foot sliding, ground collisions). Reply with ONLY the word KINEMATICS or CONTACT."
         ),
-        model=VertexGemini(model="gemini-3.7-flash"),
+        model=VertexGemini(model="gemini-2.5-flash"),
     )
     
     runner = InMemoryRunner(agent=supervisor)
@@ -182,7 +182,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
     qa_agent = Agent(
         name="QA",
         instruction=qa_prompt,
-        model=VertexGemini(model="gemini-3.7-flash")
+        model=VertexGemini(model="gemini-2.5-flash")
     )
     qa_runner = InMemoryRunner(agent=qa_agent)
     
