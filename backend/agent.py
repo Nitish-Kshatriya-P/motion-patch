@@ -107,7 +107,9 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
 
     init_vertexai()
     
-    # 1. Supervisor Agent
+    from typing import Literal
+    ExpertType = Literal["KINEMATICS", "CONTACT"]
+    
     supervisor_prompt = (
         "You are a routing agent. Determine if the user's request is related to 'Kinematics' (e.g. jitter, smoothing, animation adjustment) "
         "or 'Contact' (e.g. foot sliding, ground collisions). Reply with ONLY the word KINEMATICS or CONTACT."
@@ -118,12 +120,11 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
     )
     logger.info("Calling Supervisor Agent...")
     supervisor_resp = await supervisor.generate_content_async(contents, generation_config={"temperature": 0.0})
-    expert_type = supervisor_resp.text.strip().upper()
-    if expert_type not in ["KINEMATICS", "CONTACT"]:
-        expert_type = "KINEMATICS"
+    
+    raw_type = supervisor_resp.text.strip().upper()
+    expert_type: ExpertType = "KINEMATICS" if raw_type not in ["KINEMATICS", "CONTACT"] else raw_type
     logger.info(f"Supervisor routed to: {expert_type} Expert")
     
-    # 2. Expert Agent
     expert_instruction = (
         f"You are a {expert_type.capitalize()} Expert in Blender Python (bpy). Write a python script that will be executed "
         "in headless blender to modify a .bvh file. "
@@ -161,7 +162,6 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
     
     response = await _run_tool_loop(chat, response, mcp_session)
     
-    # 3. QA Judge Agent
     qa_prompt = (
         "You are a QA Judge Agent for Blender Python scripts. Evaluate the provided script against basic physical constraints "
         "(e.g., no flying away, smooth transitions, correct bone references). "
@@ -183,12 +183,11 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
         if qa_result.startswith("PASS") or attempt == max_attempts - 1:
             logger.info("QA Judge passed the script.")
             return script_code
-        else:
-            logger.info(f"QA Failed: {qa_result}. Retrying...")
-            response = await chat.send_message_async(
-                [f"Your script failed QA. Fix the following issue and generate the full script again:\n{qa_result}"],
-                generation_config={"temperature": 0.2}
-            )
-            response = await _run_tool_loop(chat, response, mcp_session)
-            
-    return extract_code(response.text)
+        
+        logger.info(f"QA Failed: {qa_result}. Retrying...")
+        response = await chat.send_message_async(
+            [f"Your script failed QA. Fix the following issue and generate the full script again:\n{qa_result}"],
+            generation_config={"temperature": 0.2}
+        )
+        response = await _run_tool_loop(chat, response, mcp_session)
+    return ""

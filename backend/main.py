@@ -81,8 +81,28 @@ class BVHFile:
     def hierarchy(self) -> str:
         return self.content.split("MOTION")[0].strip() if "MOTION" in self.content else self.content
 
-from typing import Optional
+from typing import Optional, NamedTuple
 from agent import AudioPayload
+
+class BatchFile(NamedTuple):
+    id: str
+    original_name: str
+    path: str
+
+async def validate_input(prompt: Optional[str], audio: Optional[UploadFile]) -> tuple[str, Optional[AudioPayload]]:
+    prompt = prompt.strip() if prompt else ""
+    audio_data = None
+    if audio:
+        content = await audio.read()
+        if not content and not prompt:
+            raise HTTPException(status_code=400, detail="Empty prompt and empty audio")
+        if content:
+            if not audio.content_type or not audio.content_type.startswith("audio/"):
+                raise HTTPException(status_code=400, detail="Invalid audio format")
+            audio_data = AudioPayload(content, audio.content_type)
+    elif not prompt:
+        raise HTTPException(status_code=400, detail="Must provide either a prompt or audio instructions")
+    return prompt, audio_data
 
 @app.post("/generate_code")
 async def generate_code(
@@ -90,25 +110,13 @@ async def generate_code(
     prompt: Optional[str] = Form(""),
     audio: Optional[UploadFile] = File(None)
 ):
-    prompt = prompt.strip() if prompt else ""
-    if not prompt and not audio:
-        raise HTTPException(status_code=400, detail="Must provide either a prompt or audio instructions")
-
-    if audio and (not audio.content_type or not audio.content_type.startswith("audio/")):
-        raise HTTPException(status_code=400, detail="Invalid audio format")
-
+    prompt, audio_data = await validate_input(prompt, audio)
     logger.info(f"Generating code for prompt: {prompt}")
     
     bvh_path = get_valid_bvh_path(bvh_id)
         
     with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
         bvh_file = BVHFile(f.read())
-
-    audio_data = None
-    if audio:
-        content = await audio.read()
-        if content:
-            audio_data = AudioPayload(content, audio.content_type)
 
     try:
         script_code = await generate_blender_script(prompt, bvh_file.hierarchy, audio_data)
@@ -145,9 +153,7 @@ async def batch_process(
     if len(files) > 5:
         raise HTTPException(status_code=400, detail="Batch size limit exceeded. Maximum 5 files allowed.")
     
-    prompt = prompt.strip() if prompt else ""
-    if not prompt and not audio:
-        raise HTTPException(status_code=400, detail="Must provide either a prompt or audio instructions")
+    prompt, audio_data = await validate_input(prompt, audio)
 
     bvh_files_info = []
     first_bvh_hierarchy = ""
@@ -168,14 +174,8 @@ async def batch_process(
         if idx == 0:
             first_bvh_hierarchy = BVHFile(content.decode("utf-8", errors="ignore")).hierarchy
             
-        bvh_files_info.append({"id": file_id, "original_name": file.filename, "path": file_path})
+        bvh_files_info.append(BatchFile(id=file_id, original_name=file.filename, path=file_path))
 
-    audio_data = None
-    if audio:
-        content = await audio.read()
-        if content:
-            audio_data = AudioPayload(content, audio.content_type)
-            
     try:
         script_code = await generate_blender_script(prompt, first_bvh_hierarchy, audio_data)
         logger.info(f"Generated Batch Agent Code:\n{script_code}")
@@ -183,21 +183,25 @@ async def batch_process(
         logger.error(f"Agent code generation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Agent code generation failed: {str(e)}")
 
-    processed_files = []
+    class ProcessedFile(NamedTuple):
+        original_name: str
+        output_path: str
+        
+    processed_files: List[ProcessedFile] = []
     
-    async def process_file(file_info):
+    async def process_file(file_info: BatchFile):
         temp_output_id = str(uuid.uuid4())
         try:
             output_path = await asyncio.to_thread(
                 execute_blender_script, 
-                file_info["path"], 
+                file_info.path, 
                 script_code, 
                 UPLOAD_DIR, 
                 temp_output_id
             )
-            processed_files.append({"original_name": file_info["original_name"], "output_path": output_path})
+            processed_files.append(ProcessedFile(file_info.original_name, output_path))
         except Exception as e:
-            logger.error(f"Failed to process {file_info['original_name']}: {e}")
+            logger.error(f"Failed to process {file_info.original_name}: {e}")
 
     await asyncio.gather(*(process_file(info) for info in bvh_files_info))
 
@@ -209,6 +213,6 @@ async def batch_process(
     
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for pfile in processed_files:
-            zipf.write(pfile["output_path"], arcname=f"fixed_{pfile['original_name']}")
+            zipf.write(pfile.output_path, arcname=f"fixed_{pfile.original_name}")
 
     return FileResponse(zip_path, media_type="application/zip", filename="batch_results.zip")

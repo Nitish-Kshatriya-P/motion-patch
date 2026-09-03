@@ -57,7 +57,8 @@ export default function BatchProcessor() {
     });
     formData.append('prompt', prompt);
     if (audioBlob) {
-      formData.append('audio', audioBlob, 'batch_recording.webm');
+      const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
+      formData.append('audio', audioBlob, `batch_recording.${ext}`);
     }
 
     try {

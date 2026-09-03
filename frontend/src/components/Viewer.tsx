@@ -65,9 +65,10 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
   const [processingState, setProcessingState] = useState<'idle' | 'generating_code' | 'editing_code' | 'processing_blender'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [scriptCode, setScriptCode] = useState<string>("");
+  const [stagedAudio, setStagedAudio] = useState<Blob | null>(null);
 
-  const submitGeneration = async (audioBlob?: Blob) => {
-    if (!prompt.trim() && !audioBlob) {
+  const submitGeneration = async () => {
+    if (!prompt.trim() && !stagedAudio) {
       setError("Please provide a prompt or audio instructions.");
       return;
     }
@@ -78,12 +79,14 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
       const formData = new FormData();
       formData.append('bvh_id', bvhId);
       formData.append('prompt', prompt);
-      if (audioBlob) {
-        formData.append('audio', audioBlob, 'recording.webm');
+      if (stagedAudio) {
+        const ext = stagedAudio.type.includes('mp4') ? 'mp4' : 'webm';
+        formData.append('audio', stagedAudio, `recording.${ext}`);
       }
 
       const genRes = await axios.post('http://localhost:8000/generate_code', formData);
       setScriptCode(genRes.data.code);
+      setStagedAudio(null);
       setProcessingState('editing_code');
     } catch (err: any) {
       console.error(err);
@@ -165,26 +168,16 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
                   if (e.key === 'Enter') submitGeneration();
                 }}
               />
-              <HoldToSpeakButton onRecordingComplete={submitGeneration} onError={setError} disabled={processingState !== 'idle'} />
-              <label className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 cursor-pointer flex items-center justify-center shrink-0">
-                <input 
-                  type="file" 
-                  accept=".mp3,.webm,.mpeg"
-                  hidden 
-                  disabled={processingState !== 'idle'}
-                  onChange={e => {
-                    if (e.target.files && e.target.files[0]) {
-                      submitGeneration(e.target.files[0]);
-                    }
-                    e.target.value = '';
-                  }}
-                />
-                <span className="text-xs font-semibold px-1">MP3</span>
-              </label>
+              <HoldToSpeakButton onRecordingComplete={setStagedAudio} onError={setError} disabled={processingState !== 'idle'} />
+              {stagedAudio && (
+                <div className="flex items-center bg-green-900/30 text-green-400 text-xs px-2 py-1 rounded ml-2 cursor-pointer hover:bg-green-900/50" onClick={() => setStagedAudio(null)}>
+                  Audio Ready (×)
+                </div>
+              )}
               <button 
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white p-2 rounded-lg transition-colors ml-2 shrink-0"
                 onClick={() => submitGeneration()}
-                disabled={!prompt.trim() || processingState !== 'idle'}
+                disabled={(!prompt.trim() && !stagedAudio) || processingState !== 'idle'}
               >
                 <Send className="w-5 h-5" />
               </button>
