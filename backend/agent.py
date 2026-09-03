@@ -10,6 +10,15 @@ from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 from config import BLENDER_BOILERPLATE
 
+from google.adk.models import Gemini
+from google.genai import Client
+from functools import cached_property
+
+class VertexGemini(Gemini):
+    @cached_property
+    def api_client(self) -> Client:
+        return Client(vertexai=True, location="us-central1")
+
 logger = logging.getLogger(__name__)
 
 _mcp_client_ctx = None
@@ -109,7 +118,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
             "and classify the anomaly into one of two categories: 'Kinematics' (e.g. smoothing, jitter, IK) "
             "or 'Contact' (e.g. foot sliding, ground collisions). Reply with ONLY the word KINEMATICS or CONTACT."
         ),
-        model="gemini-3.7-flash"
+        model=VertexGemini(model="gemini-3.7-flash"),
     )
     
     runner = InMemoryRunner(agent=supervisor)
@@ -133,7 +142,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
                 "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
                 "Your only output should be the raw python code enclosed in ```python ``` tags."
             ),
-            model="gemini-1.5-pro",
+            model=VertexGemini(model="gemini-1.5-pro"),
             tools=[query_clickhouse_rag]
         )
     else:
@@ -146,7 +155,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
                 "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
                 "Your only output should be the raw python code enclosed in ```python ``` tags."
             ),
-            model="gemini-1.5-pro",
+            model=VertexGemini(model="gemini-1.5-pro"),
             tools=[query_clickhouse_rag]
         )
     
@@ -173,7 +182,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
     qa_agent = Agent(
         name="QA",
         instruction=qa_prompt,
-        model="gemini-3.7-flash"
+        model=VertexGemini(model="gemini-3.7-flash")
     )
     qa_runner = InMemoryRunner(agent=qa_agent)
     
