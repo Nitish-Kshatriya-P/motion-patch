@@ -14,7 +14,7 @@ def get_clickhouse_client():
     )
 
 def init_vertexai():
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "test-project")
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
     vertexai.init(project=project, location=location)
 
