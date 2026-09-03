@@ -4,7 +4,7 @@ import { OrbitControls, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js';
 import axios from 'axios';
-import { generateBlenderCode } from '../services/api';
+
 import { extractError, getAudioExtension } from '../utils';
 import { Loader2, Send, Play, Mic } from 'lucide-react';
 import Editor from '@monaco-editor/react';
