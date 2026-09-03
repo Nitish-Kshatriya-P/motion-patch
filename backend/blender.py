@@ -27,7 +27,7 @@ def execute_blender_script(params: ExecutionParams) -> str:
         cmd = [
             "docker", "run", "--name", container_name,
             "-v", f"{mount_path}:/workspace",
-            "headless-blender", "blender", "-b", "-P", "/workspace/script.py"
+            "headless-blender", "blender", "-b", "--python-exit-code", "1", "-P", "/workspace/script.py"
         ]
         logger.info(f"Executing Docker command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)

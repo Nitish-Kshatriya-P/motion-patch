@@ -162,6 +162,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
                 "You are an expert Blender Python developer for motion capture cleanup.\n"
                 f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
                 "Guidelines: Use fcurve smoothing, Euler filtering, or low-pass filters to remove jitter.\n"
+                "CRITICAL: Do NOT use bpy.ops.graph.* or bpy.ops.action.* as they require UI context. Modify fcurve.keyframe_points directly.\n"
                 "You MUST call the query_clickhouse_rag tool to check for similar past fixes before generating your code.\n"
                 "Your only output should be the raw python code enclosed in ```python ``` tags."
             ),
