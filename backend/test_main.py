@@ -69,22 +69,26 @@ def mock_chat():
         
         yield chat
 
-def test_generate_code_success(mock_chat, client, test_bvh_id):
+@pytest.fixture
+def empty_audio():
+    return {"audio": ("", b"")}
+
+def test_generate_code_success(mock_chat, client, test_bvh_id, empty_audio):
     mock_response = AsyncMock()
     mock_response.text = "```python\nimport bpy\nprint('hello')\n```"
     mock_chat.send_message_async.return_value = mock_response
 
-    response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
+    response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files=empty_audio)
     
     assert response.status_code == 200
     data = response.json()
     assert "code" in data
     assert data["code"] == "import bpy\nprint('hello')"
 
-def test_generate_code_error(mock_chat, client, test_bvh_id):
+def test_generate_code_error(mock_chat, client, test_bvh_id, empty_audio):
     with patch("main.generate_blender_script") as mock_gen:
         mock_gen.side_effect = Exception("Vertex AI Error")
-        response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files={"audio": ("", b"")})
+        response = client.post("/generate_code", data={"prompt": "make it say hello", "bvh_id": test_bvh_id}, files=empty_audio)
         
         assert response.status_code == 500
         assert "Agent code generation failed" in response.json()["detail"]

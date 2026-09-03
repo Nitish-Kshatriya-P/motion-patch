@@ -97,12 +97,13 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
     text_prompt = f"Original BVH Skeleton:\n```bvh\n{hierarchy_only}\n```"
     if prompt:
         text_prompt += f"\n\nUser Request: {prompt}"
-    if audio:
-        text_prompt += f"\n\nUser instructions are provided in the attached audio."
-    contents.append(text_prompt)
     
     if audio:
+        text_prompt += f"\n\nUser instructions are provided in the attached audio."
+        contents.append(text_prompt)
         contents.append(Part.from_data(data=audio.data, mime_type=audio.mime_type))
+    else:
+        contents.append(text_prompt)
 
     init_vertexai()
     

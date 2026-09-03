@@ -4,8 +4,8 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] React UI updated for multi-file upload and batch progress visualization
-- [ ] FastAPI integration with Google Cloud Run Jobs API to spin up concurrent workers
-- [ ] Hardcoded logic limiting batch size to 5 files to protect API budget
+- [x] React UI updated for multi-file upload and batch progress visualization
+- [x] FastAPI integration with Google Cloud Run Jobs API to spin up concurrent workers
+- [x] Hardcoded logic limiting batch size to 5 files to protect API budget

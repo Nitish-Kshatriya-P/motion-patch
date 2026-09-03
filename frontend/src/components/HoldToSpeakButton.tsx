@@ -28,7 +28,11 @@ export default function HoldToSpeakButton({
         onError("Hold the button longer to record audio.");
         return;
       }
-      const recorder = new MediaRecorder(stream);
+      let mimeType = 'audio/webm';
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      }
+      const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorder.current = recorder;
       audioChunks.current = [];
       
@@ -37,7 +41,7 @@ export default function HoldToSpeakButton({
       };
       
       recorder.onstop = () => {
-        const blob = new Blob(audioChunks.current, { type: 'audio/webm' });
+        const blob = new Blob(audioChunks.current, { type: mimeType });
         stopStream(stream);
         if (blob.size > 0) onRecordingComplete(blob);
       };
