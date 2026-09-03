@@ -57,6 +57,16 @@ def extract_code(script_code: str) -> str:
         script_code = "\n".join(lines)
     return script_code
 
+def extract_text_from_events(events: list) -> str:
+    for e in reversed(events):
+        if hasattr(e, 'content') and e.content and getattr(e.content, 'parts', None):
+            for part in e.content.parts:
+                if getattr(part, 'text', None):
+                    return part.text
+        if hasattr(e, 'output') and e.output and hasattr(e.output, 'text') and e.output.text:
+            return e.output.text
+    return ""
+
 def validate_script_ast(script_code: str) -> str:
     try:
         tree = ast.parse(script_code)
@@ -127,7 +137,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
         sup_contents.append(types.Part.from_bytes(data=instruction_payload.audio_data, mime_type=instruction_payload.audio_mime))
         
     events = await runner.run_debug(sup_contents)
-    raw_type = events[-1].output.text.strip().upper() if events else "KINEMATICS"
+    raw_type = extract_text_from_events(events).strip().upper() if events else "KINEMATICS"
     expert_type = ExpertType.CONTACT if "CONTACT" in raw_type else ExpertType.KINEMATICS
         
     logger.info(f"Supervisor routed to: {expert_type.value}")
@@ -189,7 +199,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
     for attempt in range(max_attempts):
         logger.info(f"Expert Agent generating code (Attempt {attempt+1}/{max_attempts})...")
         events = await expert_runner.run_debug(req_contents)
-        response_text = events[-1].output.text if events else ""
+        response_text = extract_text_from_events(events) if events else ""
         script_code = extract_code(response_text)
         
         ast_error = validate_script_ast(script_code)
@@ -200,7 +210,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
             qa_result = f"FAIL: {constraint_error}"
         else:
             qa_events = await qa_runner.run_debug([f"Evaluate this script:\n```python\n{script_code}\n```"])
-            qa_result = qa_events[-1].output.text.strip() if qa_events else "FAIL"
+            qa_result = extract_text_from_events(qa_events).strip() if qa_events else "FAIL"
             
         if qa_result.startswith("PASS"):
             logger.info("QA Judge passed the script.")
