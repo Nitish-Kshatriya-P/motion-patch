@@ -122,7 +122,7 @@ async def query_clickhouse_rag(query: str) -> str:
 
 async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
     supervisor = Agent(
-        name="Supervisor",
+        name="supervisor",
         instruction=(
             "You are a routing agent for a Mocap Studio. Read the user's prompt (or infer from audio) "
             "and classify the anomaly into one of two categories: 'Kinematics' (e.g. smoothing, jitter, IK) "
@@ -144,7 +144,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
     
     if expert_type == ExpertType.CONTACT:
         expert = Agent(
-            name="Contact Worker",
+            name="contact_worker",
             instruction=(
                 "You are an expert Blender Python developer for motion capture cleanup.\n"
                 f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE}\n"
@@ -157,7 +157,7 @@ async def generate_blender_script(bvh_content: str, instruction_payload) -> str:
         )
     else:
         expert = Agent(
-            name="Kinematics Worker",
+            name="kinematics_worker",
             instruction=(
                 "You are an expert Blender Python developer for motion capture cleanup.\n"
                 f"You must strictly follow the boilerplate pattern:\n{BLENDER_BOILERPLATE}\n"
