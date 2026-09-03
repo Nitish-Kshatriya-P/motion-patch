@@ -100,6 +100,8 @@ def validate_physical_constraints(script_code: str, expert_type: ExpertType) -> 
         if "ik" not in script_code.lower() and "constraint" not in script_code.lower():
             return "Physical Constraint Error: Contact expert must implement IK or constraints to prevent foot sliding."
     elif expert_type == ExpertType.KINEMATICS:
+        if "bpy.ops.graph" in script_code or "bpy.ops.action" in script_code:
+            return "Context Error: Do not use bpy.ops.graph.* or bpy.ops.action.* in headless mode. Modify fcurve.keyframe_points directly."
         if "fcurve" not in script_code.lower() and "filter" not in script_code.lower() and "smooth" not in script_code.lower():
             return "Physical Constraint Error: Kinematics expert must apply smoothing or filtering to fcurves."
     return ""
