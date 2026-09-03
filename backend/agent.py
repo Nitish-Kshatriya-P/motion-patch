@@ -150,7 +150,7 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
         "or 'Contact' (e.g. foot sliding, ground collisions). Reply with ONLY the word KINEMATICS or CONTACT."
     )
     supervisor = GenerativeModel(
-        model_name="gemini-1.5-pro",
+        model_name="gemini-3.7-flash",
         system_instruction=supervisor_prompt
     )
     logger.info("Calling Supervisor Agent...")
@@ -216,7 +216,7 @@ async def generate_blender_script(prompt: str, hierarchy_only: str, audio: Audio
         "If it passes, reply 'PASS'. If it fails, reply 'FAIL: ' followed by a brief description of the issue."
     )
     qa_model = GenerativeModel(
-        model_name="gemini-1.5-pro",
+        model_name="gemini-3.7-flash",
         system_instruction=qa_prompt
     )
     

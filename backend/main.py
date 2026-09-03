@@ -218,6 +218,7 @@ async def dispatch_cloud_run_job(input_path: str, script_code: str, temp_id: str
         client = run_v2.JobsClient()
         request = run_v2.RunJobRequest(name="projects/dummy-project/locations/us-central1/jobs/headless-blender")
         client.run_job(request=request)
+        return os.path.join(UPLOAD_DIR, f"{temp_id}.bvh")
     except Exception as e:
         logger.info(f"Falling back to local execution: {e}")
         return await asyncio.to_thread(

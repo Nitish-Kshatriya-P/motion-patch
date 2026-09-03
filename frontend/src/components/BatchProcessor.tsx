@@ -37,6 +37,12 @@ export default function BatchProcessor() {
     return () => clearInterval(interval);
   }, [batchId, batchStatus]);
 
+  useEffect(() => {
+    if (batchStatus === 'COMPLETED' && batchId) {
+      window.location.href = `http://localhost:8000/batch_process/${batchId}/download`;
+    }
+  }, [batchStatus, batchId]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length === 0) return;
