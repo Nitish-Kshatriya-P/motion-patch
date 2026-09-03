@@ -29,9 +29,6 @@ export default function HoldToSpeakButton({
         return;
       }
       let mimeType = 'audio/webm';
-      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')) {
-        mimeType = 'audio/mp4';
-      }
       const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorder.current = recorder;
       audioChunks.current = [];

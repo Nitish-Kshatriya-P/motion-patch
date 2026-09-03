@@ -30,3 +30,5 @@ bpy.ops.import_anim.bvh(filepath='/workspace/input.bvh')
 armature = bpy.context.selected_objects[0]
 {fix_logic}
 bpy.ops.export_anim.bvh(filepath='/workspace/output.bvh')"""
+import os
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
