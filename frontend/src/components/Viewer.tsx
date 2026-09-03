@@ -24,7 +24,7 @@ function BvhModel({ url }: { url: string }) {
       const animationMixer = new THREE.AnimationMixer(bvh.skeleton.bones[0]);
       mixer.current = animationMixer;
       
-      const action = m.clipAction(bvh.clip);
+      const action = animationMixer.clipAction(bvh.clip);
       action.play();
     }
     return () => {
