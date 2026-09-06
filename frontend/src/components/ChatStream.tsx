@@ -172,17 +172,21 @@ export default function ChatStream({
                   <div className="flex items-center gap-1.5">
                     {isUser ? (
                       <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
-                        <div className="w-4 h-4 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 flex items-center justify-center">
+                        <div
+                          className="w-4 h-4 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 flex items-center justify-center"
+                          aria-label="User"
+                        >
                           <User className="w-2.5 h-2.5" />
                         </div>
-                        <span>You</span>
                       </div>
                     ) : (
                       <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
-                        <div className="w-4 h-4 rounded bg-blue-950 border border-blue-800/80 text-blue-400 flex items-center justify-center">
+                        <div
+                          className="w-4 h-4 rounded bg-blue-950 border border-blue-800/80 text-blue-400 flex items-center justify-center"
+                          aria-label="Agent"
+                        >
                           <Bot className="w-2.5 h-2.5" />
                         </div>
-                        <span>MotionPatch Agent</span>
                         <span className="text-[10px] text-zinc-500 font-normal">Gemini 2.5</span>
                       </div>
                     )}
@@ -194,15 +198,21 @@ export default function ChatStream({
 
                 <div className="w-full flex flex-col gap-2">
                   {msg.text && (
-                    <div
-                      className={`w-full rounded-xl px-3.5 py-2.5 text-xs leading-relaxed ${
-                        isUser
-                          ? 'bg-zinc-800/60 border border-white/[0.08] text-zinc-100 shadow-sm'
-                          : 'bg-zinc-900/90 border border-white/[0.06] text-zinc-200'
-                      }`}
-                    >
-                      <div className="whitespace-pre-wrap">{renderMessageText(msg.text)}</div>
-                    </div>
+                    isUser ? (
+                      <div
+                        data-testid={`user-message-${msg.id}`}
+                        className="w-full rounded-xl px-3.5 py-2.5 text-xs leading-relaxed bg-zinc-800/80 border border-white/[0.1] text-zinc-100 shadow-sm"
+                      >
+                        <div className="whitespace-pre-wrap">{renderMessageText(msg.text)}</div>
+                      </div>
+                    ) : (
+                      <div
+                        data-testid={`assistant-message-${msg.id}`}
+                        className="w-full px-1 py-1 text-xs leading-relaxed text-zinc-200"
+                      >
+                        <div className="whitespace-pre-wrap">{renderMessageText(msg.text)}</div>
+                      </div>
+                    )
                   )}
 
                   {msg.proposedPlan && !msg.isApproved && (
@@ -299,10 +309,12 @@ export default function ChatStream({
           >
             <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 select-none px-1">
               <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
-                <div className="w-4 h-4 rounded bg-blue-950 border border-blue-800/80 text-blue-400 flex items-center justify-center">
+                <div
+                  className="w-4 h-4 rounded bg-blue-950 border border-blue-800/80 text-blue-400 flex items-center justify-center"
+                  aria-label="Agent"
+                >
                   <Bot className="w-2.5 h-2.5" />
                 </div>
-                <span>MotionPatch Agent</span>
                 <span className="text-[10px] text-zinc-500 font-normal">Gemini 2.5</span>
               </div>
               <span className="inline-flex items-center gap-1 text-[10px] font-mono text-blue-400 bg-blue-950/60 border border-blue-800/50 px-2 py-0.5 rounded-full animate-pulse">
@@ -311,7 +323,7 @@ export default function ChatStream({
               </span>
             </div>
 
-            <div className="w-full rounded-xl px-4 py-3 bg-zinc-900/90 border border-blue-900/40 text-zinc-200 shadow-lg flex items-center justify-between gap-3">
+            <div className="w-full px-1 py-1 flex items-center justify-between gap-3 text-zinc-300">
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1" aria-label="generating dots">
                   <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce [animation-delay:-0.3s]" />

@@ -11,7 +11,7 @@ describe('ChatStream', () => {
     expect(screen.getByText('Drop BVH file or type instruction')).toBeInTheDocument();
   });
 
-  it('renders user and assistant messages as full-width turn cards with metadata', () => {
+  it('renders user message in a card and assistant message without a card, without You or MotionPatch Agent text', () => {
     const mockMessages: ChatMessage[] = [
       {
         id: 'msg-1',
@@ -31,9 +31,14 @@ describe('ChatStream', () => {
 
     expect(screen.getByTestId('chat-turn-msg-1')).toBeInTheDocument();
     expect(screen.getByTestId('chat-turn-msg-2')).toBeInTheDocument();
-    expect(screen.getByText('You')).toBeInTheDocument();
-    expect(screen.getByText('MotionPatch Agent')).toBeInTheDocument();
+    expect(screen.queryByText('You')).not.toBeInTheDocument();
+    expect(screen.queryByText('MotionPatch Agent')).not.toBeInTheDocument();
     expect(screen.getByText('#session-')).toBeInTheDocument();
+
+    const userMsg = screen.getByTestId('user-message-msg-1');
+    const assistantMsg = screen.getByTestId('assistant-message-msg-2');
+    expect(userMsg).toHaveClass('rounded-xl');
+    expect(assistantMsg).not.toHaveClass('rounded-xl');
   });
 
   it('renders joint and frame interactive tokens with click handlers', () => {
