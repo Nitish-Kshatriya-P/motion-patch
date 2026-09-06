@@ -104,4 +104,28 @@ describe('MultimodalPromptBar', () => {
     fireEvent.click(removeBtn);
     expect(onClear).toHaveBeenCalledTimes(1);
   });
+
+  it('renders generating indicators and disables input when isGenerating is true', () => {
+    const onSend = vi.fn();
+    const onUpload = vi.fn();
+
+    render(
+      <MultimodalPromptBar
+        onSendMessage={onSend}
+        onFileUpload={onUpload}
+        isGenerating={true}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask MotionPatch AI or describe kinematic adjustments/i);
+    expect(textarea).toBeDisabled();
+
+    expect(screen.getByTestId('prompt-generating-badge')).toBeInTheDocument();
+    expect(screen.getByTestId('prompt-generating-spinner')).toBeInTheDocument();
+
+    const sendBtn = screen.getByTitle('Generating answer...');
+    expect(sendBtn).toBeDisabled();
+    fireEvent.click(sendBtn);
+    expect(onSend).not.toHaveBeenCalled();
+  });
 });

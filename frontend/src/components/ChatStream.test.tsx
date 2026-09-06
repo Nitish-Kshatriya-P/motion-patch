@@ -84,4 +84,37 @@ describe('ChatStream', () => {
     fireEvent.click(authBtn);
     expect(onAuthorize).toHaveBeenCalledWith('msg-1', mockMessages[0].proposedPlan);
   });
+
+  it('renders answer generating indicator when isGenerating is true', () => {
+    const mockMessages: ChatMessage[] = [
+      {
+        id: 'msg-1',
+        sender: 'user',
+        timestamp: '2026-09-06T12:00:00.000Z',
+        text: 'How do I fix foot sliding?',
+      },
+    ];
+
+    render(<ChatStream messages={mockMessages} isGenerating={true} />);
+
+    expect(screen.getByTestId('generating-indicator')).toBeInTheDocument();
+    expect(screen.getByText('Generating answer...')).toBeInTheDocument();
+    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+  });
+
+  it('does not render answer generating indicator when isGenerating is false', () => {
+    const mockMessages: ChatMessage[] = [
+      {
+        id: 'msg-1',
+        sender: 'user',
+        timestamp: '2026-09-06T12:00:00.000Z',
+        text: 'How do I fix foot sliding?',
+      },
+    ];
+
+    render(<ChatStream messages={mockMessages} isGenerating={false} />);
+
+    expect(screen.queryByTestId('generating-indicator')).not.toBeInTheDocument();
+    expect(screen.queryByText('Generating answer...')).not.toBeInTheDocument();
+  });
 });

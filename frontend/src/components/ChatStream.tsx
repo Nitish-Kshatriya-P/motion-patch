@@ -34,6 +34,7 @@ interface ChatStreamProps {
   onSelectFinding?: (findingId: string, frameStart: number, joint?: string) => void;
   onDropFile?: (file: File) => void;
   isUploading?: boolean;
+  isGenerating?: boolean;
   onApproveRepair?: (messageId: string, planId: string, approvalId: string, customPrompt?: string, selectedJoints?: string[]) => void;
   onDeclineRepair?: (messageId: string) => void;
   onInspectCode?: (scriptCode: string) => void;
@@ -46,6 +47,7 @@ export default function ChatStream({
   onSelectFinding,
   onDropFile,
   isUploading,
+  isGenerating,
   onApproveRepair,
   onDeclineRepair,
   onInspectCode,
@@ -58,7 +60,7 @@ export default function ChatStream({
     if (typeof bottomRef.current?.scrollIntoView === 'function') {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isUploading]);
+  }, [messages, isUploading, isGenerating]);
 
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
@@ -287,6 +289,43 @@ export default function ChatStream({
           <div className="flex items-center gap-2.5 bg-zinc-900 border border-blue-900/60 text-blue-300 px-3.5 py-2.5 rounded-xl shadow-lg w-fit text-xs">
             <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
             <span className="font-medium">Analyzing BVH kinematics and inspecting joints...</span>
+          </div>
+        )}
+
+        {isGenerating && (
+          <div
+            data-testid="generating-indicator"
+            className="w-full flex flex-col gap-1.5"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 select-none px-1">
+              <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
+                <div className="w-4 h-4 rounded bg-blue-950 border border-blue-800/80 text-blue-400 flex items-center justify-center">
+                  <Bot className="w-2.5 h-2.5" />
+                </div>
+                <span>MotionPatch Agent</span>
+                <span className="text-[10px] text-zinc-500 font-normal">Gemini 2.5</span>
+              </div>
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono text-blue-400 bg-blue-950/60 border border-blue-800/50 px-2 py-0.5 rounded-full animate-pulse">
+                <Sparkles className="w-2.5 h-2.5 animate-spin" />
+                <span>Thinking...</span>
+              </span>
+            </div>
+
+            <div className="w-full rounded-xl px-4 py-3 bg-zinc-900/90 border border-blue-900/40 text-zinc-200 shadow-lg flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1" aria-label="generating dots">
+                  <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" />
+                </div>
+                <span className="text-xs text-zinc-300 font-medium">
+                  Generating answer...
+                </span>
+              </div>
+              <span className="text-[10px] font-mono text-zinc-500">
+                Analyzing kinematics
+              </span>
+            </div>
           </div>
         )}
 

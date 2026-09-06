@@ -7,6 +7,7 @@ interface MultimodalPromptBarProps {
   onSendMessage: (text: string, audio?: Blob | null) => void;
   onFileUpload: (file: File, userPrompt?: string) => void;
   disabled?: boolean;
+  isGenerating?: boolean;
   externalStagedFile?: File | null;
   onClearExternalStagedFile?: () => void;
   diagnosticStatus?: string | null;
@@ -18,6 +19,7 @@ export default function MultimodalPromptBar({
   onSendMessage,
   onFileUpload,
   disabled,
+  isGenerating,
   externalStagedFile,
   onClearExternalStagedFile,
   diagnosticStatus,
@@ -146,7 +148,7 @@ export default function MultimodalPromptBar({
     }
   };
 
-  const canSubmit = Boolean(prompt.trim() || audioBlob || stagedFile) && !disabled;
+  const canSubmit = Boolean(prompt.trim() || audioBlob || stagedFile) && !disabled && !isGenerating;
 
   const quickActions = hasAnomalies
     ? [
@@ -260,7 +262,7 @@ export default function MultimodalPromptBar({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={disabled}
+          disabled={disabled || isGenerating}
           placeholder={
             stagedFile
               ? "Press Enter to inspect staged BVH or add repair prompt..."
@@ -274,7 +276,7 @@ export default function MultimodalPromptBar({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={disabled}
+              disabled={disabled || isGenerating}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded-lg transition-colors shrink-0 disabled:opacity-50 cursor-pointer flex items-center gap-1 text-[11px]"
               title="Attach .bvh file"
             >
@@ -285,13 +287,23 @@ export default function MultimodalPromptBar({
             <HoldToSpeakButton
               onRecordingComplete={(blob) => setAudioBlob(blob)}
               onError={(msg) => setAudioError(msg)}
-              disabled={disabled || false}
+              disabled={disabled || isGenerating || false}
             />
 
-            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-zinc-500 ml-1">
-              <Sparkles className="w-2.5 h-2.5 text-blue-400" />
-              <span>Gemini 2.5</span>
-            </span>
+            {isGenerating ? (
+              <span
+                data-testid="prompt-generating-badge"
+                className="inline-flex items-center gap-1.5 text-[10px] font-mono text-blue-400 ml-1 bg-blue-950/60 border border-blue-800/50 px-2 py-0.5 rounded-full animate-pulse"
+              >
+                <Sparkles className="w-2.5 h-2.5 animate-spin" />
+                <span>Generating answer...</span>
+              </span>
+            ) : (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-zinc-500 ml-1">
+                <Sparkles className="w-2.5 h-2.5 text-blue-400" />
+                <span>Gemini 2.5</span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -303,9 +315,22 @@ export default function MultimodalPromptBar({
               onClick={handleSend}
               disabled={!canSubmit}
               className="w-7 h-7 bg-white text-zinc-950 hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-600 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-md disabled:cursor-not-allowed"
-              title={stagedFile ? "Upload and analyze staged file" : "Send message"}
+              title={
+                isGenerating
+                  ? "Generating answer..."
+                  : stagedFile
+                  ? "Upload and analyze staged file"
+                  : "Send message"
+              }
             >
-              <ArrowUp className="w-3.5 h-3.5 stroke-[2]" />
+              {isGenerating ? (
+                <div
+                  data-testid="prompt-generating-spinner"
+                  className="w-3.5 h-3.5 border-2 border-zinc-600 border-t-zinc-200 rounded-full animate-spin"
+                />
+              ) : (
+                <ArrowUp className="w-3.5 h-3.5 stroke-[2]" />
+              )}
             </button>
           </div>
         </div>

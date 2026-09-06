@@ -27,6 +27,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isDragOverWindow, setIsDragOverWindow] = useState(false);
   const [stagedFile, setStagedFile] = useState<File | null>(null);
@@ -93,6 +94,7 @@ export default function App() {
     setSelectedFinding(null);
     setMessages([]);
     setIsUploading(false);
+    setIsGenerating(false);
     setStagedFile(null);
   }, []);
 
@@ -314,6 +316,7 @@ export default function App() {
       return;
     }
 
+    setIsGenerating(true);
     try {
       const res = await axios.post(`http://localhost:8000/sessions/${activeSessionId}/chat`, {
         message: prompt || (audio ? 'Analyze voice memo repair instructions' : ''),
@@ -341,6 +344,8 @@ export default function App() {
         text: `Error processing kinematic request: ${errDetail}`,
       };
       setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -808,7 +813,8 @@ export default function App() {
               <MultimodalPromptBar
                 onSendMessage={handleSendMessage}
                 onFileUpload={handleFileUpload}
-                disabled={isUploading}
+                disabled={isUploading || isGenerating}
+                isGenerating={isGenerating}
                 externalStagedFile={stagedFile}
                 onClearExternalStagedFile={() => setStagedFile(null)}
               />
@@ -857,6 +863,7 @@ export default function App() {
               onSelectFinding={handleSelectFinding}
               onDropFile={handleFileUpload}
               isUploading={isUploading}
+              isGenerating={isGenerating}
               onApproveRepair={handleApproveRepair}
               onDeclineRepair={handleDeclineRepair}
               onInspectCode={handleInspectCode}
@@ -865,7 +872,8 @@ export default function App() {
             <MultimodalPromptBar
               onSendMessage={handleSendMessage}
               onFileUpload={handleFileUpload}
-              disabled={isUploading}
+              disabled={isUploading || isGenerating}
+              isGenerating={isGenerating}
               externalStagedFile={stagedFile}
               onClearExternalStagedFile={() => setStagedFile(null)}
               diagnosticStatus={activeBrokenIntervals.length === 0 && activeSessionId ? 'CLEAN' : undefined}
