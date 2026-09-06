@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { DragEvent } from 'react';
-import { Bot, User, Sparkles, UploadCloud } from 'lucide-react';
+import { Bot, Sparkles, UploadCloud } from 'lucide-react';
 import DiagnosticCard, { type DiagnosticCardProps } from './DiagnosticCard';
 import ConsentPromptCard from './ConsentPromptCard';
 import DynamicAgentRosterCard, { type DynamicAgent } from './DynamicAgentRosterCard';
@@ -121,10 +121,6 @@ export default function ChatStream({
           <span className="font-semibold text-xs text-zinc-200 tracking-wide font-mono uppercase">Agent Inspector</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 text-[10px] font-mono text-zinc-400 bg-white/[0.04] border border-white/[0.06] px-2 py-0.5 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Gemini 2.5 Flash
-          </span>
           {activeSessionId && (
             <span className="text-[10px] font-mono text-zinc-500 truncate max-w-[90px] tabular-nums" title={activeSessionId}>
               #{activeSessionId.slice(0, 8)}
@@ -168,33 +164,11 @@ export default function ChatStream({
                 data-testid={`chat-turn-${msg.id}`}
                 className="w-full flex flex-col gap-1.5"
               >
-                <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 select-none px-1">
-                  <div className="flex items-center gap-1.5">
-                    {isUser ? (
-                      <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
-                        <div
-                          className="w-4 h-4 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 flex items-center justify-center"
-                          aria-label="User"
-                        >
-                          <User className="w-2.5 h-2.5" />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
-                        <div
-                          className="w-4 h-4 rounded bg-blue-950 border border-blue-800/80 text-blue-400 flex items-center justify-center"
-                          aria-label="Agent"
-                        >
-                          <Bot className="w-2.5 h-2.5" />
-                        </div>
-                        <span className="text-[10px] text-zinc-500 font-normal">Gemini 2.5</span>
-                      </div>
-                    )}
+                {formattedTime && (
+                  <div className={`flex items-center text-[10px] font-mono text-zinc-500 select-none px-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    <span className="tabular-nums">{formattedTime}</span>
                   </div>
-                  {formattedTime && (
-                    <span className="text-[10px] text-zinc-500 tabular-nums">{formattedTime}</span>
-                  )}
-                </div>
+                )}
 
                 <div className="w-full flex flex-col gap-2">
                   {msg.text && (
@@ -307,16 +281,7 @@ export default function ChatStream({
             data-testid="generating-indicator"
             className="w-full flex flex-col gap-1.5"
           >
-            <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 select-none px-1">
-              <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
-                <div
-                  className="w-4 h-4 rounded bg-blue-950 border border-blue-800/80 text-blue-400 flex items-center justify-center"
-                  aria-label="Agent"
-                >
-                  <Bot className="w-2.5 h-2.5" />
-                </div>
-                <span className="text-[10px] text-zinc-500 font-normal">Gemini 2.5</span>
-              </div>
+            <div className="flex items-center text-[11px] font-mono text-zinc-400 select-none px-1">
               <span className="inline-flex items-center gap-1 text-[10px] font-mono text-blue-400 bg-blue-950/60 border border-blue-800/50 px-2 py-0.5 rounded-full animate-pulse">
                 <Sparkles className="w-2.5 h-2.5 animate-spin" />
                 <span>Thinking...</span>

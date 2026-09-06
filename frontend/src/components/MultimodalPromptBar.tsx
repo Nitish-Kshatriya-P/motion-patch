@@ -290,18 +290,13 @@ export default function MultimodalPromptBar({
               disabled={disabled || isGenerating || false}
             />
 
-            {isGenerating ? (
+            {isGenerating && (
               <span
                 data-testid="prompt-generating-badge"
                 className="inline-flex items-center gap-1.5 text-[10px] font-mono text-blue-400 ml-1 bg-blue-950/60 border border-blue-800/50 px-2 py-0.5 rounded-full animate-pulse"
               >
                 <Sparkles className="w-2.5 h-2.5 animate-spin" />
                 <span>Generating answer...</span>
-              </span>
-            ) : (
-              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-zinc-500 ml-1">
-                <Sparkles className="w-2.5 h-2.5 text-blue-400" />
-                <span>Gemini 2.5</span>
               </span>
             )}
           </div>

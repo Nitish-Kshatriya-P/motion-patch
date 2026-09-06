@@ -33,6 +33,10 @@ describe('ChatStream', () => {
     expect(screen.getByTestId('chat-turn-msg-2')).toBeInTheDocument();
     expect(screen.queryByText('You')).not.toBeInTheDocument();
     expect(screen.queryByText('MotionPatch Agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gemini 2.5 Flash')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gemini 2.5')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('User')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Agent')).not.toBeInTheDocument();
     expect(screen.getByText('#session-')).toBeInTheDocument();
 
     const userMsg = screen.getByTestId('user-message-msg-1');
