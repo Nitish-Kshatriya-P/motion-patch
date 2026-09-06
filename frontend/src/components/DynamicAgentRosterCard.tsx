@@ -169,8 +169,8 @@ export default function DynamicAgentRosterCard({
               <div className="flex flex-wrap items-center gap-2 pt-0.5">
                 {bones.length > 0 && (
                   <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-mono text-zinc-400 flex items-center gap-0.5">
-                      <Activity className="w-3 h-3 text-zinc-500" />
+                    <span className="text-[10px] font-mono text-zinc-300 font-medium flex items-center gap-0.5">
+                      <Activity className="w-3 h-3 text-zinc-400" />
                       Joints:
                     </span>
                     <div className="flex flex-wrap gap-1">
@@ -178,7 +178,7 @@ export default function DynamicAgentRosterCard({
                         <span
                           key={bone}
                           data-testid={`agent-joint-${agent.agent_id}-${bone}`}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-900 border border-white/[0.08] text-zinc-300"
+                          className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-900 border border-white/[0.15] text-zinc-200 font-medium"
                         >
                           {bone}
                         </span>
@@ -188,8 +188,8 @@ export default function DynamicAgentRosterCard({
                 )}
 
                 {frames.length > 0 && (
-                  <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-400">
-                    <span className="text-zinc-400">Frames:</span>
+                  <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-300 font-medium">
+                    <span className="text-zinc-300 font-medium">Frames:</span>
                     <span
                       data-testid={`agent-frames-${agent.agent_id}`}
                       className="px-1.5 py-0.5 rounded bg-blue-950/60 border border-blue-900/80 text-blue-300 font-mono tabular-nums"
@@ -199,8 +199,8 @@ export default function DynamicAgentRosterCard({
                   </div>
                 )}
 
-                <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-400 ml-auto">
-                  <span className="text-zinc-400 flex items-center gap-0.5">
+                <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-300 font-medium ml-auto">
+                  <span className="text-zinc-300 font-medium flex items-center gap-0.5">
                     <Database className="w-2.5 h-2.5 text-purple-400" />
                     Tool:
                   </span>
@@ -220,7 +220,7 @@ export default function DynamicAgentRosterCard({
                   <button
                     type="button"
                     onClick={() => toggleCodeExpand(agent.agent_id)}
-                    className="flex items-center gap-1 text-[10px] font-mono text-zinc-400 hover:text-zinc-200 cursor-pointer py-0.5"
+                    className="flex items-center gap-1 text-[10px] font-mono text-zinc-200 hover:text-white font-medium cursor-pointer py-0.5"
                   >
                     <Code2 className="w-3 h-3 text-blue-400" />
                     <span>Generated bpy Execution Block</span>
@@ -230,7 +230,7 @@ export default function DynamicAgentRosterCard({
                     <button
                       type="button"
                       onClick={() => handleCopyCode(agent.agent_id, codeSnippet)}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-white/[0.08] text-[9px] font-mono cursor-pointer transition-colors"
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white border border-white/[0.15] text-[9px] font-mono font-medium cursor-pointer transition-colors"
                       title="Copy script"
                     >
                       {copiedAgentCode[agent.agent_id] ? (

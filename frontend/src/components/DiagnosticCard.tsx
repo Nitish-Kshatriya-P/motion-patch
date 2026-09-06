@@ -119,17 +119,17 @@ export default function DiagnosticCard({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 bg-zinc-950/80 p-2.5 rounded-lg border border-white/[0.06] text-xs font-mono tabular-nums">
-        <div className="flex items-center gap-1.5 text-zinc-400 font-sans">
+        <div className="flex items-center gap-1.5 text-zinc-300 font-sans">
           <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           <span>Duration:</span>
           <span className="font-semibold text-zinc-200 font-mono">{durationSeconds.toFixed(2)}s</span>
         </div>
-        <div className="flex items-center gap-1.5 text-zinc-400 font-sans">
+        <div className="flex items-center gap-1.5 text-zinc-300 font-sans">
           <Film className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           <span>Frames:</span>
           <span className="font-semibold text-zinc-200 font-mono">{frameCount}</span>
         </div>
-        <div className="flex items-center gap-1.5 text-zinc-400 font-sans">
+        <div className="flex items-center gap-1.5 text-zinc-300 font-sans">
           <span>Framerate:</span>
           <span className="font-semibold text-zinc-200 font-mono">{fps ? `${fps} fps` : '30.0 fps'}</span>
         </div>
@@ -149,7 +149,7 @@ export default function DiagnosticCard({
         <div className="flex flex-col gap-2.5">
           {brokenJoints.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-zinc-400">Targeted Joints Selection:</span>
+              <span className="text-xs font-medium text-zinc-300">Targeted Joints Selection:</span>
               <div className="flex flex-wrap gap-1.5">
                 {brokenJoints.map((joint) => {
                   const isSelected = activeSelectedJoints.includes(joint);
@@ -167,7 +167,7 @@ export default function DiagnosticCard({
                       className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer border ${
                         isSelected
                           ? 'bg-blue-600 text-white border-blue-500 shadow-xs'
-                          : 'bg-zinc-900 border-white/[0.08] text-zinc-400 hover:text-zinc-200'
+                          : 'bg-zinc-900/90 border-white/[0.15] text-zinc-200 hover:text-white hover:border-white/[0.3]'
                       }`}
                       title={`Toggle ${joint} for targeted repair plan`}
                     >
@@ -181,7 +181,7 @@ export default function DiagnosticCard({
 
           <div className="flex flex-col gap-2 mt-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-zinc-400">Fault Intervals & Diagnostics:</span>
+              <span className="text-xs font-medium text-zinc-300">Fault Intervals & Diagnostics:</span>
               {frameIntervals.length > 3 && (
                 <button
                   type="button"
@@ -213,17 +213,17 @@ export default function DiagnosticCard({
                           className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border cursor-pointer ${
                             isJointSelected
                               ? 'bg-blue-600 text-white border-blue-500'
-                              : 'bg-zinc-900 text-zinc-300 border-white/[0.08] hover:border-white/[0.18]'
+                              : 'bg-zinc-900 text-zinc-200 border-white/[0.15] hover:border-white/[0.3] hover:text-white'
                           }`}
                           title="Click to toggle joint selection for targeted repair"
                         >
                           {item.joint}
                         </button>
-                        <span className="text-zinc-600">|</span>
+                        <span className="text-zinc-500">|</span>
                         <button
                           type="button"
                           onClick={() => onSelectFinding?.(item.finding_id, item.frame_start, item.joint)}
-                          className="px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 hover:bg-blue-900 hover:text-white border border-blue-800/80 font-mono text-[11px] cursor-pointer tabular-nums"
+                          className="px-2 py-0.5 rounded bg-blue-950/90 text-blue-200 hover:bg-blue-900 hover:text-white border border-blue-700 font-mono text-[11px] font-semibold cursor-pointer tabular-nums"
                           title="Click to scrub 3D timeline to frame_start and highlight bone"
                         >
                           [Frames {item.frame_start} - {item.frame_end}]
@@ -238,13 +238,13 @@ export default function DiagnosticCard({
                         >
                           {item.severity}
                         </span>
-                        <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-white/[0.08] text-zinc-400 text-[10px] font-mono">
+                        <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-white/[0.15] text-zinc-200 text-[10px] font-mono font-medium">
                           {item.anomaly_type}
                         </span>
                         <button
                           type="button"
                           onClick={() => toggleFindingExpanded(item.finding_id)}
-                          className="p-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-white/[0.08] transition-colors cursor-pointer"
+                          className="p-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-white/[0.12] transition-colors cursor-pointer"
                           title="Expand biomechanical metrics and explanation"
                         >
                           {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
@@ -257,7 +257,7 @@ export default function DiagnosticCard({
                         <button
                           type="button"
                           onClick={() => onSelectFinding?.(item.finding_id, item.frame_start, item.joint)}
-                          className="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-blue-300 border border-white/[0.08] text-[10px] font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                          className="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white border border-white/[0.15] text-[10px] font-medium flex items-center gap-1 cursor-pointer transition-colors"
                           title="Center 3D camera and inspect anomaly interval"
                         >
                           <Crosshair className="w-3 h-3 text-blue-400" />
@@ -269,7 +269,7 @@ export default function DiagnosticCard({
                           className={`px-2 py-0.5 rounded text-[10px] font-medium border cursor-pointer transition-colors flex items-center gap-1 ${
                             isJointSelected
                               ? 'bg-blue-950/80 text-blue-200 border-blue-800/80 hover:bg-blue-900'
-                              : 'bg-zinc-900 text-zinc-400 border-white/[0.08] hover:text-zinc-200'
+                              : 'bg-zinc-900 text-zinc-200 border-white/[0.15] hover:text-white hover:border-white/[0.3]'
                           }`}
                           title="Toggle this joint in the repair scope"
                         >
@@ -277,7 +277,7 @@ export default function DiagnosticCard({
                           <span>{isJointSelected ? 'Targeted for Repair ✓' : 'Include in Repair'}</span>
                         </button>
                       </div>
-                      <span className="text-[11px] text-zinc-400 truncate max-w-[220px]">
+                      <span className="text-[11px] text-zinc-200 font-medium truncate max-w-[240px]">
                         {item.explanation}
                       </span>
                     </div>
@@ -286,11 +286,11 @@ export default function DiagnosticCard({
                       <div className="flex flex-col gap-2 pt-2 border-t border-white/[0.04] text-xs">
                         <div className="grid grid-cols-2 gap-2 bg-zinc-900/90 p-2 rounded-lg border border-white/[0.08] font-mono text-[11px] tabular-nums">
                           <div>
-                            <span className="text-zinc-500">Max Joint Velocity: </span>
+                            <span className="text-zinc-400 font-medium">Max Joint Velocity: </span>
                             <span className="text-amber-300 font-semibold">{peakVelocity}</span>
                           </div>
                           <div>
-                            <span className="text-zinc-500">Acceleration Spike: </span>
+                            <span className="text-zinc-400 font-medium">Acceleration Spike: </span>
                             <span className="text-red-400 font-semibold">{accelSpike}</span>
                           </div>
                         </div>

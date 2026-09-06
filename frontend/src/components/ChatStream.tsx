@@ -122,13 +122,12 @@ export default function ChatStream({
         </div>
         <div className="flex items-center gap-2">
           {activeSessionId && (
-            <span className="text-[10px] font-mono text-zinc-500 truncate max-w-[90px] tabular-nums" title={activeSessionId}>
+            <span className="text-[10px] font-mono text-zinc-400 font-medium truncate max-w-[90px] tabular-nums" title={activeSessionId}>
               #{activeSessionId.slice(0, 8)}
             </span>
           )}
         </div>
       </div>
-
       <div
         ref={dropZoneRef}
         onDragOver={handleDragOver}
@@ -203,9 +202,9 @@ export default function ChatStream({
                       <p className="text-xs text-zinc-300 leading-normal">{msg.proposedPlan.description}</p>
                       {msg.proposedPlan.selected_joints && msg.proposedPlan.selected_joints.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[10px] text-zinc-400 font-mono">Target Joints:</span>
+                          <span className="text-[10px] text-zinc-300 font-medium font-mono">Target Joints:</span>
                           {msg.proposedPlan.selected_joints.map((j) => (
-                            <span key={j} className="px-2 py-0.5 rounded bg-zinc-900 border border-white/[0.08] text-blue-300 font-mono text-[10px]">
+                            <span key={j} className="px-2 py-0.5 rounded bg-zinc-900/90 border border-blue-800/60 text-blue-200 font-mono text-[10px] font-semibold">
                               {j}
                             </span>
                           ))}

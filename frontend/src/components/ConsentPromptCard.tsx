@@ -186,14 +186,14 @@ export default function ConsentPromptCard({
         </div>
 
         <div className="flex flex-col gap-1.5 text-xs text-zinc-300">
-          <p className="text-zinc-400">
+          <p className="text-zinc-300 font-medium">
             Execution unblocked. Multi-agents are authorized to repair kinematic anomalies.
           </p>
           {approvalId && (
             <div className="flex items-center justify-between gap-2 mt-1 bg-zinc-950/80 px-3 py-2 rounded-lg border border-emerald-500/20 font-mono text-[11px]">
               <div className="flex items-center gap-2 min-w-0">
                 <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="text-zinc-400">Approval Token:</span>
+                <span className="text-zinc-300 font-medium">Approval Token:</span>
                 <span data-testid="approval-id" className="text-emerald-300 font-medium truncate tabular-nums">
                   {approvalId}
                 </span>
@@ -201,7 +201,7 @@ export default function ConsentPromptCard({
               <button
                 type="button"
                 onClick={handleCopyToken}
-                className="p-1 rounded text-zinc-400 hover:text-emerald-300 hover:bg-emerald-950/40 transition-colors shrink-0 cursor-pointer"
+                className="p-1 rounded text-zinc-300 hover:text-emerald-300 hover:bg-emerald-950/40 transition-colors shrink-0 cursor-pointer"
                 title="Copy approval token"
               >
                 {copiedToken ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -210,13 +210,13 @@ export default function ConsentPromptCard({
           )}
           {selectedJoints.length > 0 && (
             <div className="flex items-center gap-1.5 mt-1 bg-zinc-950/80 px-3 py-1.5 rounded-lg border border-white/[0.08] text-[11px] font-mono">
-              <span className="text-zinc-400">Authorized Joints:</span>
+              <span className="text-zinc-300 font-medium">Authorized Joints:</span>
               <span className="text-blue-300">{selectedJoints.join(', ')}</span>
             </div>
           )}
           {customPrompt && (
             <div className="flex flex-col gap-1 mt-1 bg-zinc-950/80 px-3 py-2 rounded-lg border border-white/[0.08] font-mono text-[11px]">
-              <span className="text-zinc-400">Custom Instructions:</span>
+              <span className="text-zinc-300 font-medium">Custom Instructions:</span>
               <span className="text-blue-300">{customPrompt}</span>
             </div>
           )}
@@ -235,7 +235,7 @@ export default function ConsentPromptCard({
           <XCircle className="w-4 h-4 text-zinc-500 shrink-0" />
           <span className="font-semibold text-sm text-zinc-300">Repair Declined</span>
         </div>
-        <p className="text-xs text-zinc-400">
+        <p className="text-xs text-zinc-300 font-medium">
           Multi-agent kinematic repair was declined for this analysis. Session has been closed.
         </p>
       </div>
@@ -280,7 +280,7 @@ export default function ConsentPromptCard({
             <button
               type="button"
               onClick={() => setShowJointSelector(false)}
-              className="text-zinc-400 hover:text-white text-xs cursor-pointer"
+              className="text-zinc-300 hover:text-white text-xs cursor-pointer font-medium"
             >
               Close
             </button>
@@ -296,7 +296,7 @@ export default function ConsentPromptCard({
                   className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer border ${
                     isSelected
                       ? 'bg-blue-600 border-blue-500 text-white font-semibold'
-                      : 'bg-zinc-900 border-white/[0.08] text-zinc-400 hover:text-zinc-200'
+                      : 'bg-zinc-900/90 border-white/[0.15] text-zinc-200 hover:text-white font-medium'
                   }`}
                 >
                   {joint}
@@ -338,7 +338,7 @@ export default function ConsentPromptCard({
               type="button"
               onClick={() => setShowCustomPrompt(false)}
               disabled={isLoading}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors border border-white/[0.08] disabled:opacity-50 cursor-pointer"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white transition-colors border border-white/[0.15] disabled:opacity-50 cursor-pointer"
             >
               Cancel
             </button>
@@ -396,7 +396,7 @@ export default function ConsentPromptCard({
               setShowCustomPrompt(false);
             }}
             disabled={isLoading}
-            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-800/90 hover:bg-zinc-700 text-zinc-200 transition-colors flex items-center gap-1.5 border border-white/[0.08] disabled:opacity-50 cursor-pointer"
+            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-800/90 hover:bg-zinc-700 text-zinc-100 hover:text-white transition-colors flex items-center gap-1.5 border border-white/[0.15] disabled:opacity-50 cursor-pointer"
           >
             <Target className="w-3.5 h-3.5 text-blue-400" />
             <span>Select Specific Joints/Frames...</span>
@@ -410,9 +410,9 @@ export default function ConsentPromptCard({
               setShowJointSelector(false);
             }}
             disabled={isLoading}
-            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-800/90 hover:bg-zinc-700 text-zinc-200 transition-colors flex items-center gap-1.5 border border-white/[0.08] disabled:opacity-50 cursor-pointer"
+            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-800/90 hover:bg-zinc-700 text-zinc-100 hover:text-white transition-colors flex items-center gap-1.5 border border-white/[0.15] disabled:opacity-50 cursor-pointer"
           >
-            <Sliders className="w-3.5 h-3.5 text-zinc-400" />
+            <Sliders className="w-3.5 h-3.5 text-zinc-300" />
             <span>Custom Instruction</span>
           </button>
 
@@ -421,7 +421,7 @@ export default function ConsentPromptCard({
             data-testid="decline-btn"
             onClick={handleDecline}
             disabled={isLoading}
-            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-950/80 hover:bg-red-950/40 text-zinc-400 hover:text-red-300 transition-colors flex items-center gap-1.5 border border-white/[0.08] hover:border-red-900/50 disabled:opacity-50 cursor-pointer ml-auto"
+            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-900/90 hover:bg-red-950/50 text-zinc-300 hover:text-red-200 transition-colors flex items-center gap-1.5 border border-white/[0.15] hover:border-red-500/50 disabled:opacity-50 cursor-pointer ml-auto"
           >
             <XCircle className="w-3.5 h-3.5" />
             <span>Decline / Keep Original</span>
