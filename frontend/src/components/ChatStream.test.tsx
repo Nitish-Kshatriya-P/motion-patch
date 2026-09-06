@@ -1,0 +1,87 @@
+import { describe, it, expect, vi } from 'vitest';
+import '@testing-library/jest-dom/vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import ChatStream, { type ChatMessage } from './ChatStream';
+
+describe('ChatStream', () => {
+  it('renders empty state when there are no messages', () => {
+    render(<ChatStream messages={[]} />);
+
+    expect(screen.getByText('Codex Kinematic Inspector')).toBeInTheDocument();
+    expect(screen.getByText('Drop BVH file or type instruction')).toBeInTheDocument();
+  });
+
+  it('renders user and assistant messages as full-width turn cards with metadata', () => {
+    const mockMessages: ChatMessage[] = [
+      {
+        id: 'msg-1',
+        sender: 'user',
+        timestamp: '2026-09-06T12:00:00.000Z',
+        text: 'Please check LeftFoot at frame 42 for foot sliding',
+      },
+      {
+        id: 'msg-2',
+        sender: 'assistant',
+        timestamp: '2026-09-06T12:00:05.000Z',
+        text: 'Inspected LeftFoot and confirmed anomaly at frames 42-50.',
+      },
+    ];
+
+    render(<ChatStream messages={mockMessages} activeSessionId="session-abc12345" />);
+
+    expect(screen.getByTestId('chat-turn-msg-1')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-turn-msg-2')).toBeInTheDocument();
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByText('MotionPatch Agent')).toBeInTheDocument();
+    expect(screen.getByText('#session-')).toBeInTheDocument();
+  });
+
+  it('renders joint and frame interactive tokens with click handlers', () => {
+    const onSelectFinding = vi.fn();
+    const mockMessages: ChatMessage[] = [
+      {
+        id: 'msg-1',
+        sender: 'assistant',
+        timestamp: '2026-09-06T12:00:00.000Z',
+        text: 'Observed RightFoot slipping at frames 14-20.',
+      },
+    ];
+
+    render(<ChatStream messages={mockMessages} onSelectFinding={onSelectFinding} />);
+
+    const jointBtn = screen.getByRole('button', { name: 'RightFoot' });
+    expect(jointBtn).toBeInTheDocument();
+    fireEvent.click(jointBtn);
+    expect(onSelectFinding).toHaveBeenCalledWith('', 0, 'RightFoot');
+
+    const frameBtn = screen.getByRole('button', { name: 'frames 14-20' });
+    expect(frameBtn).toBeInTheDocument();
+    fireEvent.click(frameBtn);
+    expect(onSelectFinding).toHaveBeenCalledWith('', 14);
+  });
+
+  it('renders proposed plan authorization card when plan data is present', () => {
+    const onAuthorize = vi.fn();
+    const mockMessages: ChatMessage[] = [
+      {
+        id: 'msg-1',
+        sender: 'assistant',
+        timestamp: '2026-09-06T12:00:00.000Z',
+        text: 'I recommend smoothing the spine.',
+        proposedPlan: {
+          session_id: 'sess-1',
+          description: 'Smooth spine jitter across frames 10-30',
+          selected_joints: ['Spine'],
+        },
+      },
+    ];
+
+    render(<ChatStream messages={mockMessages} onAuthorizeProposedPlan={onAuthorize} />);
+
+    expect(screen.getByText('Proposed Targeted Repair Plan')).toBeInTheDocument();
+    expect(screen.getByText('Smooth spine jitter across frames 10-30')).toBeInTheDocument();
+    const authBtn = screen.getByRole('button', { name: /Authorize Agents/i });
+    fireEvent.click(authBtn);
+    expect(onAuthorize).toHaveBeenCalledWith('msg-1', mockMessages[0].proposedPlan);
+  });
+});
