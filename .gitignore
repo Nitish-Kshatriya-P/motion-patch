@@ -3,5 +3,9 @@ __pycache__/
 .scratch/
 scratch/
 *.diff
+node_modules/
 frontend/node_modules/
 .pytest_cache/
+*.db
+frontend/dist/
+tools/

@@ -6,7 +6,7 @@ import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader.js';
 import axios from 'axios';
 
 import { extractError, getAudioExtension } from '../utils';
-import { Loader2, Send, Play, Mic } from 'lucide-react';
+import { Loader2, Send, Play } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import HoldToSpeakButton from './HoldToSpeakButton';
 
@@ -58,7 +58,21 @@ function Loader() {
   );
 }
 
-export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpdate?: (id: string) => void }) {
+interface ViewerProps {
+  bvhId: string;
+  onBvhUpdate?: (id: string) => void;
+  analysisId?: string;
+  sessionId?: string;
+  onOpenConsent?: () => void;
+}
+
+export default function Viewer({
+  bvhId,
+  onBvhUpdate,
+  analysisId,
+  sessionId,
+  onOpenConsent,
+}: ViewerProps) {
   const [timestamp, setTimestamp] = useState(() => Date.now());
   const url = `http://localhost:8000/bvh/${bvhId}?t=${timestamp}`;
 
@@ -145,6 +159,18 @@ export default function Viewer({ bvhId, onBvhUpdate }: { bvhId: string, onBvhUpd
             <BvhModel url={url} />
           </React.Suspense>
         </Canvas>
+
+        {onOpenConsent && analysisId && (
+          <div className="absolute top-4 right-4 z-20">
+            <button
+              onClick={onOpenConsent}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow-lg transition-colors border border-blue-400/40"
+              title={sessionId ? `Session: ${sessionId}` : undefined}
+            >
+              Review Faults & Consent
+            </button>
+          </div>
+        )}
 
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 flex flex-col gap-2 z-10">
           {isProcessing && (

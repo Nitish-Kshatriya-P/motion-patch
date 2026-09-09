@@ -13,6 +13,8 @@ interface MultimodalPromptBarProps {
   diagnosticStatus?: string | null;
   hasAnomalies?: boolean;
   anomalyTypes?: string[];
+  uploadCount?: number;
+  maxUploads?: number;
 }
 
 export default function MultimodalPromptBar({
@@ -24,6 +26,8 @@ export default function MultimodalPromptBar({
   onClearExternalStagedFile,
   diagnosticStatus,
   hasAnomalies,
+  uploadCount,
+  maxUploads = 5,
 }: MultimodalPromptBarProps) {
   const [prompt, setPrompt] = useState('');
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -31,6 +35,7 @@ export default function MultimodalPromptBar({
   const [internalStagedFile, setInternalStagedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  const isAtUploadLimit = typeof uploadCount === 'number' && uploadCount >= maxUploads;
   const stagedFile = externalStagedFile ?? internalStagedFile;
 
   const clearStaged = () => {
@@ -60,6 +65,10 @@ export default function MultimodalPromptBar({
     if ((!prompt.trim() && !audioBlob && !stagedFile) || disabled) return;
     const currentPrompt = prompt.trim();
     if (stagedFile) {
+      if (isAtUploadLimit) {
+        clearStaged();
+        return;
+      }
       onFileUpload(stagedFile, currentPrompt);
       clearStaged();
       setPrompt('');
@@ -86,6 +95,10 @@ export default function MultimodalPromptBar({
   };
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    if (isAtUploadLimit) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (file && file.name.toLowerCase().endsWith('.bvh')) {
       setInternalStagedFile(file);
@@ -96,7 +109,9 @@ export default function MultimodalPromptBar({
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragOver(true);
+    if (!isAtUploadLimit) {
+      setIsDragOver(true);
+    }
   };
 
   const handleDragLeave = (e: DragEvent) => {
@@ -109,6 +124,7 @@ export default function MultimodalPromptBar({
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
+    if (isAtUploadLimit) return;
     const file = e.dataTransfer.files?.[0];
     if (file && file.name.toLowerCase().endsWith('.bvh')) {
       setInternalStagedFile(file);
@@ -148,7 +164,10 @@ export default function MultimodalPromptBar({
     }
   };
 
-  const canSubmit = Boolean(prompt.trim() || audioBlob || stagedFile) && !disabled && !isGenerating;
+  const canSubmit =
+    Boolean(prompt.trim() || audioBlob || (stagedFile && !isAtUploadLimit)) &&
+    !disabled &&
+    !isGenerating;
 
   const quickActions = hasAnomalies
     ? [
@@ -276,12 +295,22 @@ export default function MultimodalPromptBar({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || isGenerating}
+              disabled={disabled || isGenerating || isAtUploadLimit}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded-lg transition-colors shrink-0 disabled:opacity-50 cursor-pointer flex items-center gap-1 text-[11px]"
-              title="Attach .bvh file"
+              title={
+                isAtUploadLimit
+                  ? `Upload limit reached (${uploadCount}/${maxUploads} files in this session)`
+                  : "Attach .bvh file"
+              }
             >
               <Paperclip className="w-3.5 h-3.5" />
-              <span className="text-zinc-500 text-[10px] font-mono">BVH</span>
+              <span
+                className={`text-[10px] font-mono ${
+                  isAtUploadLimit ? "text-amber-400/90 font-medium" : "text-zinc-500"
+                }`}
+              >
+                BVH{typeof uploadCount === "number" ? ` (${uploadCount}/${maxUploads})` : ""}
+              </span>
             </button>
 
             <HoldToSpeakButton
@@ -302,9 +331,6 @@ export default function MultimodalPromptBar({
           </div>
 
           <div className="flex items-center gap-2">
-            <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-zinc-400">
-              <span className="text-[9px]">⌘</span>↵
-            </kbd>
             <button
               type="button"
               onClick={handleSend}

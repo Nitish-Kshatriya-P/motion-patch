@@ -6,7 +6,7 @@ import ast
 import uuid
 import json
 import re
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Set
 
 from google.adk import Agent
 from google.adk.runners import InMemoryRunner
@@ -24,6 +24,14 @@ from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams,
 
 from config import BLENDER_BOILERPLATE
 from models import AgentSpecification, Finding, BVHMetadata
+from bvh_parser import parse_bvh_file, ParsedBVH, JointNode
+from detector import (
+    build_shared_motion_representation,
+    detect_volumetric_self_collisions,
+    vec_norm,
+    vec_sub,
+    vec_dist,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +70,7 @@ class NoEligibleAgentsException(Exception):
 class VertexGemini(Gemini):
     @cached_property
     def api_client(self) -> Client:
-        return Client(vertexai=True, location="us-central1")
+        return Client(vertexai=True, location=os.environ.get("GOOGLE_CLOUD_LOCATION", "global"))
 
 _mcp_client_ctx = None
 _mcp_session_ctx = None
@@ -788,3 +796,859 @@ async def generate_blender_script(
     if not active_roster:
         raise RuntimeError("No dynamic agents available in roster.")
     return await generate_multi_agent_script_async(bvh_content, active_roster, prompt=prompt)
+
+def build_joint_channel_map(parsed: ParsedBVH) -> Dict[str, Dict[str, int]]:
+    mapping: Dict[str, Dict[str, int]] = {}
+    for node in parsed.ordered_joints:
+        ch_dict: Dict[str, int] = {}
+        for ch_name, ch_idx in zip(node.channels, node.channel_indices):
+            ch_dict[ch_name] = ch_idx
+        mapping[node.name] = ch_dict
+    return mapping
+
+def build_edit_mask(
+    parsed: ParsedBVH,
+    roster: Optional[List[AgentSpecification]] = None,
+    findings: Optional[List[Any]] = None,
+) -> Set[Tuple[int, int]]:
+    authorized: Set[Tuple[int, int]] = set()
+    j_map = build_joint_channel_map(parsed)
+    total_frames = parsed.metadata.frame_count
+
+    if roster:
+        for spec in roster:
+            target_bones = spec.target_bones or spec.assigned_joints or []
+            tf = spec.target_frames or [0, total_frames - 1]
+            f_start = max(0, int(tf[0]))
+            f_end = min(total_frames - 1, int(tf[1]))
+            for b in target_bones:
+                if b in j_map:
+                    for ch_idx in j_map[b].values():
+                        for t in range(f_start, f_end + 1):
+                            authorized.add((t, ch_idx))
+
+    if findings:
+        for f in findings:
+            if hasattr(f, "model_dump"):
+                f_dict = f.model_dump()
+            elif isinstance(f, dict):
+                f_dict = f
+            else:
+                f_dict = getattr(f, "__dict__", {})
+            joint = f_dict.get("affected_joint")
+            f_start = max(0, int(f_dict.get("frame_start", 0)))
+            f_end = min(total_frames - 1, int(f_dict.get("frame_end", total_frames - 1)))
+            if joint and joint in j_map:
+                for ch_idx in j_map[joint].values():
+                    for t in range(f_start, f_end + 1):
+                        authorized.add((t, ch_idx))
+
+    return authorized
+
+def apply_direct_bvh_channel_patch(
+    original_bvh_path: str,
+    output_bvh_path: str,
+    channel_modifications: Dict[Tuple[int, int], float],
+    authorized_edit_mask: Set[Tuple[int, int]],
+) -> str:
+    if not os.path.exists(original_bvh_path):
+        raise FileNotFoundError(f"Source BVH file does not exist: {original_bvh_path}")
+
+    orig_abs = os.path.abspath(original_bvh_path)
+    out_abs = os.path.abspath(output_bvh_path)
+    if orig_abs == out_abs:
+        raise ValueError("Direct BVH channel patching must output to a separate asset; never mutate in-place.")
+
+    with open(original_bvh_path, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+
+    motion_line_idx = -1
+    frames_line_idx = -1
+    frame_time_line_idx = -1
+
+    for idx, line in enumerate(lines):
+        clean = line.strip()
+        if clean == "MOTION":
+            motion_line_idx = idx
+        elif motion_line_idx != -1 and clean.startswith("Frames:"):
+            frames_line_idx = idx
+        elif frames_line_idx != -1 and clean.startswith("Frame Time:"):
+            frame_time_line_idx = idx
+            break
+
+    if frame_time_line_idx == -1:
+        raise ValueError("Malformed BVH: Missing MOTION or Frame Time header lines.")
+
+    header_lines = lines[:frame_time_line_idx + 1]
+    motion_lines = lines[frame_time_line_idx + 1:]
+
+    os.makedirs(os.path.dirname(out_abs), exist_ok=True)
+    with open(out_abs, "w", encoding="utf-8", newline="\n") as out_f:
+        for h in header_lines:
+            out_f.write(h)
+
+        frame_idx = 0
+        for m_line in motion_lines:
+            tokens = m_line.strip().split()
+            if not tokens:
+                continue
+            new_tokens = []
+            for ch_idx, tok in enumerate(tokens):
+                key = (frame_idx, ch_idx)
+                if key in channel_modifications and key in authorized_edit_mask:
+                    val = channel_modifications[key]
+                    new_tokens.append(f"{val:.6f}")
+                else:
+                    new_tokens.append(tok)
+            out_f.write(" ".join(new_tokens) + "\n")
+            frame_idx += 1
+
+    return out_abs
+
+def validate_strict_edit_mask(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    authorized_mask: Set[Tuple[int, int]],
+) -> Tuple[bool, List[str]]:
+    violations = []
+    fc = min(orig_parsed.metadata.frame_count, rep_parsed.metadata.frame_count)
+    tc = min(orig_parsed.metadata.total_channels, rep_parsed.metadata.total_channels)
+
+    ch_lookup: Dict[int, Tuple[str, str]] = {}
+    for node in orig_parsed.ordered_joints:
+        for ch_name, ch_idx in zip(node.channels, node.channel_indices):
+            ch_lookup[ch_idx] = (node.name, ch_name)
+
+    for t in range(fc):
+        for k in range(tc):
+            orig_val = orig_parsed.motion[t][k]
+            rep_val = rep_parsed.motion[t][k]
+            if abs(orig_val - rep_val) > 1e-6:
+                if (t, k) not in authorized_mask:
+                    j_name, c_name = ch_lookup.get(k, ("Unknown", f"ch_{k}"))
+                    violations.append(
+                        f"Strict edit mask violation: unauthorized modification at frame {t}, "
+                        f"channel {k} ({j_name}.{c_name}): original={orig_val:.6f}, repaired={rep_val:.6f}"
+                    )
+    return len(violations) == 0, violations
+
+def check_repair_invariants(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    orig_rep: Any = None,
+    rep_rep: Any = None,
+) -> Tuple[bool, List[str]]:
+    violations = []
+
+    if rep_parsed.metadata.frame_count != orig_parsed.metadata.frame_count:
+        violations.append(
+            f"Frame count invariant violated: expected {orig_parsed.metadata.frame_count}, got {rep_parsed.metadata.frame_count}"
+        )
+
+    if abs(rep_parsed.metadata.frame_time - orig_parsed.metadata.frame_time) > 1e-6:
+        violations.append(
+            f"Frame time invariant violated: expected {orig_parsed.metadata.frame_time}, got {rep_parsed.metadata.frame_time}"
+        )
+
+    if rep_parsed.metadata.total_channels != orig_parsed.metadata.total_channels:
+        violations.append(
+            f"Channel count invariant violated: expected {orig_parsed.metadata.total_channels}, got {rep_parsed.metadata.total_channels}"
+        )
+
+    if rep_parsed.metadata.skeleton_signature != orig_parsed.metadata.skeleton_signature:
+        violations.append("Skeleton hierarchy invariant violated: skeleton signature mismatch")
+
+    if rep_parsed.metadata.joints != orig_parsed.metadata.joints:
+        violations.append("Skeleton joints invariant violated: joint names or ordering mismatch")
+
+    if orig_rep is None:
+        orig_rep = build_shared_motion_representation(orig_parsed)
+    if rep_rep is None:
+        rep_rep = build_shared_motion_representation(rep_parsed)
+
+    foot_joints = [
+        j for j in orig_parsed.metadata.joints
+        if any(k in j.lower() for k in ("foot", "toe", "ankle", "heel"))
+    ]
+    if not foot_joints:
+        foot_joints = orig_parsed.metadata.joints
+
+    orig_min_y = 1e9
+    for j in foot_joints:
+        if j in orig_rep.world_positions:
+            for p in orig_rep.world_positions[j]:
+                if p[1] < orig_min_y:
+                    orig_min_y = p[1]
+    if orig_min_y == 1e9:
+        orig_min_y = 0.0
+
+    rep_min_y = 1e9
+    for j in foot_joints:
+        if j in rep_rep.world_positions:
+            for p in rep_rep.world_positions[j]:
+                if p[1] < rep_min_y:
+                    rep_min_y = p[1]
+    if rep_min_y == 1e9:
+        rep_min_y = 0.0
+
+    if rep_min_y < orig_min_y - 0.02:
+        violations.append(
+            f"Ground penetration invariant violated: min contact elevation decreased from {orig_min_y:.4f} to {rep_min_y:.4f}"
+        )
+
+    dt = orig_parsed.metadata.frame_time
+    fc = min(orig_parsed.metadata.frame_count, rep_parsed.metadata.frame_count)
+    for j in foot_joints:
+        if j in orig_rep.world_positions and j in rep_rep.world_positions:
+            orig_pts = orig_rep.world_positions[j]
+            rep_pts = rep_rep.world_positions[j]
+            for t in range(1, fc - 1):
+                orig_speed = vec_dist(orig_pts[t], orig_pts[t - 1]) / dt
+                rep_speed = vec_dist(rep_pts[t], rep_pts[t - 1]) / dt
+                if orig_speed < 0.15 and abs(orig_pts[t][1] - orig_min_y) < 0.05:
+                    rep_h_diff = rep_pts[t][1] - orig_pts[t][1]
+                    if rep_h_diff > 0.12 and rep_speed > 0.35:
+                        violations.append(
+                            f"Contact loss invariant violated: planted contact lost on {j} at frame {t} (lifted by {rep_h_diff:.3f})"
+                        )
+                        break
+
+    orig_colls = detect_volumetric_self_collisions(orig_parsed, orig_parsed.metadata, orig_rep.world_positions)
+    rep_colls = detect_volumetric_self_collisions(rep_parsed, rep_parsed.metadata, rep_rep.world_positions)
+    if len(rep_colls) > len(orig_colls):
+        new_c_count = len(rep_colls) - len(orig_colls)
+        violations.append(
+            f"Collision invariant violated: {new_c_count} new self-collision finding(s) detected in repaired asset"
+        )
+
+    return len(violations) == 0, violations
+
+def validate_pop_repair(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    orig_rep: Any,
+    rep_rep: Any,
+    joint_name: str,
+    frame_start: int,
+    frame_end: int,
+) -> Tuple[bool, str]:
+    j_map = build_joint_channel_map(orig_parsed)
+    if joint_name not in j_map:
+        return True, ""
+    ch_indices = list(j_map[joint_name].values())
+
+    fc = orig_parsed.metadata.frame_count
+    f_start = max(0, int(frame_start))
+    f_end = min(fc - 1, int(frame_end))
+
+    orig_max_dep = 0.0
+    rep_max_dep = 0.0
+
+    for ch_idx in ch_indices:
+        orig_vals = [orig_parsed.motion[t][ch_idx] for t in range(fc)]
+        rep_vals = [rep_parsed.motion[t][ch_idx] for t in range(fc)]
+
+        ctx_pre = orig_vals[max(0, f_start - 3):f_start]
+        ctx_post = orig_vals[f_end + 1:min(fc, f_end + 4)]
+        ctx_vals = ctx_pre + ctx_post
+        if ctx_vals:
+            ctx_baseline = sum(ctx_vals) / len(ctx_vals)
+            for t in range(f_start, f_end + 1):
+                dep_orig = abs(orig_vals[t] - ctx_baseline)
+                dep_rep = abs(rep_vals[t] - ctx_baseline)
+                if dep_orig > orig_max_dep:
+                    orig_max_dep = dep_orig
+                if dep_rep > rep_max_dep:
+                    rep_max_dep = dep_rep
+
+    if orig_max_dep > 5.0 and rep_max_dep >= orig_max_dep * 0.85:
+        return False, f"Pop validation rejected: contextual pose departure on {joint_name} was not reduced (orig={orig_max_dep:.2f}, rep={rep_max_dep:.2f})"
+
+    node = orig_parsed.joint_map.get(joint_name)
+    descendants = []
+    if node:
+        stack = list(node.children)
+        while stack:
+            curr = stack.pop()
+            descendants.append(curr.name)
+            stack.extend(curr.children)
+
+    endpoint = descendants[-1] if descendants else joint_name
+    if endpoint in orig_rep.world_positions and endpoint in rep_rep.world_positions:
+        orig_end_pts = orig_rep.world_positions[endpoint]
+        rep_end_pts = rep_rep.world_positions[endpoint]
+
+        pre_pos = orig_end_pts[max(0, f_start - 1)]
+        post_pos = orig_end_pts[min(fc - 1, f_end + 1)]
+        ctx_end_pos = [(pre_pos[i] + post_pos[i]) * 0.5 for i in range(3)]
+
+        orig_end_disp = max(vec_dist(orig_end_pts[t], ctx_end_pos) for t in range(f_start, f_end + 1))
+        rep_end_disp = max(vec_dist(rep_end_pts[t], ctx_end_pos) for t in range(f_start, f_end + 1))
+
+        if orig_end_disp > 0.05 and rep_end_disp > orig_end_disp * 0.90:
+            return False, f"Pop validation rejected: limb endpoint displacement on {endpoint} was not reduced (orig={orig_end_disp:.3f}, rep={rep_end_disp:.3f})"
+
+    return True, ""
+
+def validate_jitter_repair(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    joint_name: str,
+    frame_start: int,
+    frame_end: int,
+) -> Tuple[bool, str]:
+    j_map = build_joint_channel_map(orig_parsed)
+    if joint_name not in j_map:
+        return True, ""
+    ch_indices = list(j_map[joint_name].values())
+
+    fc = orig_parsed.metadata.frame_count
+    f_start = max(0, int(frame_start))
+    f_end = min(fc - 1, int(frame_end))
+    if f_end - f_start < 3:
+        return True, ""
+
+    total_orig_reversals = 0
+    total_rep_reversals = 0
+    orig_envelope_max = 0.0
+    rep_envelope_max = 0.0
+
+    for ch_idx in ch_indices:
+        orig_v = [orig_parsed.motion[t][ch_idx] for t in range(f_start, f_end + 1)]
+        rep_v = [rep_parsed.motion[t][ch_idx] for t in range(f_start, f_end + 1)]
+
+        orig_diffs = [orig_v[i] - orig_v[i - 1] for i in range(1, len(orig_v))]
+        rep_diffs = [rep_v[i] - rep_v[i - 1] for i in range(1, len(rep_v))]
+
+        orig_reversals = sum(1 for i in range(1, len(orig_diffs)) if orig_diffs[i] * orig_diffs[i - 1] < -1e-5)
+        rep_reversals = sum(1 for i in range(1, len(rep_diffs)) if rep_diffs[i] * rep_diffs[i - 1] < -1e-5)
+
+        total_orig_reversals += orig_reversals
+        total_rep_reversals += rep_reversals
+
+        orig_envelope_max = max(orig_envelope_max, max((abs(d) for d in orig_diffs), default=0.0))
+        rep_envelope_max = max(rep_envelope_max, max((abs(d) for d in rep_diffs), default=0.0))
+
+    if total_orig_reversals >= 3 and total_rep_reversals >= total_orig_reversals:
+        return False, f"Jitter validation rejected: high-frequency reversal oscillation on {joint_name} was not reduced (orig={total_orig_reversals}, rep={total_rep_reversals})"
+
+    if orig_envelope_max > 0.5 and rep_envelope_max < 0.08 * orig_envelope_max:
+        return False, f"Jitter validation rejected: 'smoother is better' failure - velocity envelope collapsed (orig max={orig_envelope_max:.2f}, rep max={rep_envelope_max:.2f})"
+
+    return True, ""
+
+def validate_foot_slide_repair(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    orig_rep: Any,
+    rep_rep: Any,
+    joint_name: str,
+    frame_start: int,
+    frame_end: int,
+) -> Tuple[bool, str]:
+    if joint_name not in orig_rep.world_positions or joint_name not in rep_rep.world_positions:
+        return True, ""
+
+    if not any(k in joint_name.lower() for k in ("foot", "toe", "ankle", "heel")):
+        return True, ""
+
+    fc = orig_parsed.metadata.frame_count
+    f_start = max(0, int(frame_start))
+    f_end = min(fc - 1, int(frame_end))
+    if f_end <= f_start:
+        return True, ""
+
+    orig_pts = orig_rep.world_positions[joint_name]
+    rep_pts = rep_rep.world_positions[joint_name]
+
+    orig_min_y = min((orig_pts[t][1] for t in range(f_start, f_end + 1)), default=0.0)
+    rep_min_y = min((rep_pts[t][1] for t in range(f_start, f_end + 1)), default=0.0)
+    if rep_min_y < orig_min_y - 0.01:
+        return False, f"Foot slide validation rejected: repair introduced new ground penetration (min_y={rep_min_y:.4f} vs orig={orig_min_y:.4f})"
+
+    orig_drift = sum(
+        ((orig_pts[t][0] - orig_pts[t - 1][0]) ** 2 + (orig_pts[t][2] - orig_pts[t - 1][2]) ** 2) ** 0.5
+        for t in range(f_start + 1, f_end + 1)
+    )
+    rep_drift = sum(
+        ((rep_pts[t][0] - rep_pts[t - 1][0]) ** 2 + (rep_pts[t][2] - rep_pts[t - 1][2]) ** 2) ** 0.5
+        for t in range(f_start + 1, f_end + 1)
+    )
+
+    node = orig_parsed.joint_map.get(joint_name)
+    has_pos_channels = node is not None and any("position" in ch.lower() for ch in node.channels)
+
+    if orig_drift > 0.10:
+        if has_pos_channels and rep_drift >= orig_drift * 0.85:
+            return False, f"Foot slide validation rejected: linear drift during stance on {joint_name} was not reduced (orig={orig_drift:.3f}, rep={rep_drift:.3f})"
+        if not has_pos_channels and rep_drift > orig_drift * 1.05:
+            return False, f"Foot slide validation rejected: linear drift during stance on {joint_name} was increased (orig={orig_drift:.3f}, rep={rep_drift:.3f})"
+
+    return True, ""
+
+def validate_freeze_repair(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    joint_name: str,
+    frame_start: int,
+    frame_end: int,
+) -> Tuple[bool, str]:
+    j_map = build_joint_channel_map(orig_parsed)
+    if joint_name not in j_map:
+        return True, ""
+    ch_indices = list(j_map[joint_name].values())
+
+    fc = orig_parsed.metadata.frame_count
+    f_start = max(0, int(frame_start))
+    f_end = min(fc - 1, int(frame_end))
+    if f_end <= f_start:
+        return True, ""
+
+    rep_has_movement = False
+    boundary_jerk = False
+
+    for ch_idx in ch_indices:
+        orig_vals = [orig_parsed.motion[t][ch_idx] for t in range(fc)]
+        rep_vals = [rep_parsed.motion[t][ch_idx] for t in range(fc)]
+
+        mean_val = sum(rep_vals[f_start:f_end + 1]) / (f_end - f_start + 1)
+        var_rep = sum((rep_vals[t] - mean_val) ** 2 for t in range(f_start, f_end + 1))
+        if var_rep > 1e-4:
+            rep_has_movement = True
+
+        if f_start > 0:
+            pre_step = abs(orig_vals[f_start] - orig_vals[f_start - 1])
+            rep_start_step = abs(rep_vals[f_start] - rep_vals[f_start - 1])
+            if rep_start_step > max(15.0, pre_step * 5.0 + 5.0):
+                boundary_jerk = True
+
+    if not rep_has_movement:
+        return False, f"Freeze validation rejected: motion on {joint_name} remains unnaturally frozen without plausible continuation"
+
+    if boundary_jerk:
+        return False, f"Freeze validation rejected: repair injected disruptive boundary discontinuity"
+
+    return True, ""
+
+def validate_root_jump_repair(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    joint_name: str,
+    frame_start: int,
+    frame_end: int,
+) -> Tuple[bool, str]:
+    root_name = orig_parsed.root_node.name
+    if joint_name != root_name:
+        return True, ""
+
+    j_map = build_joint_channel_map(orig_parsed)
+    root_channels = j_map.get(root_name, {})
+    pos_indices = [idx for name, idx in root_channels.items() if "position" in name.lower()]
+    if not pos_indices:
+        return True, ""
+
+    fc = orig_parsed.metadata.frame_count
+    t_jump = max(1, int(frame_start))
+
+    orig_step = sum((orig_parsed.motion[t_jump][k] - orig_parsed.motion[t_jump - 1][k]) ** 2 for k in pos_indices) ** 0.5
+    rep_step = sum((rep_parsed.motion[t_jump][k] - rep_parsed.motion[t_jump - 1][k]) ** 2 for k in pos_indices) ** 0.5
+
+    if orig_step > 5.0 and rep_step >= orig_step * 0.5:
+        return False, f"Root jump validation rejected: jump discontinuity was not resolved (orig={orig_step:.2f}, rep={rep_step:.2f})"
+
+    max_path_drift = 0.0
+    for t in range(t_jump + 1, min(fc - 1, t_jump + 20)):
+        for k in pos_indices:
+            orig_d = orig_parsed.motion[t + 1][k] - orig_parsed.motion[t][k]
+            rep_d = rep_parsed.motion[t + 1][k] - rep_parsed.motion[t][k]
+            diff = abs(rep_d - orig_d)
+            if diff > max_path_drift:
+                max_path_drift = diff
+
+    if max_path_drift > 0.5:
+        return False, f"Root jump validation rejected: subsequent path relative continuity was distorted (max vel diff={max_path_drift:.3f})"
+
+    return True, ""
+
+def validate_pose_violation_repair(
+    orig_parsed: ParsedBVH,
+    rep_parsed: ParsedBVH,
+    joint_name: str,
+    frame_start: int,
+    frame_end: int,
+) -> Tuple[bool, str]:
+    j_map = build_joint_channel_map(orig_parsed)
+    if joint_name not in j_map:
+        return True, ""
+    ch_dict = j_map[joint_name]
+
+    fc = orig_parsed.metadata.frame_count
+    f_start = max(0, int(frame_start))
+    f_end = min(fc - 1, int(frame_end))
+
+    orig_max_angle = 0.0
+    rep_max_angle = 0.0
+
+    for ch_name, ch_idx in ch_dict.items():
+        if "rotation" in ch_name.lower():
+            for t in range(f_start, f_end + 1):
+                o_ang = abs(orig_parsed.motion[t][ch_idx])
+                r_ang = abs(rep_parsed.motion[t][ch_idx])
+                if o_ang > orig_max_angle:
+                    orig_max_angle = o_ang
+                if r_ang > rep_max_angle:
+                    rep_max_angle = r_ang
+
+    if orig_max_angle > 140.0 and rep_max_angle >= orig_max_angle:
+        return False, f"Pose violation validation rejected: joint angle violation on {joint_name} was not reduced"
+
+    for ch_name, ch_idx in ch_dict.items():
+        if "rotation" in ch_name.lower():
+            for t in range(f_start, f_end + 1):
+                o_val = abs(orig_parsed.motion[t][ch_idx])
+                r_val = abs(rep_parsed.motion[t][ch_idx])
+                if o_val < 90.0 and r_val > 150.0:
+                    return False, f"Pose violation validation rejected: secondary hyperextension introduced on {joint_name}.{ch_name} ({r_val:.1f} deg)"
+
+    return True, ""
+
+def validate_repair_quality(
+    original_bvh_path: str,
+    repaired_bvh_path: str,
+    roster: Optional[List[AgentSpecification]] = None,
+    findings: Optional[List[Any]] = None,
+    authorized_mask: Optional[Set[Tuple[int, int]]] = None,
+) -> Tuple[bool, List[str]]:
+    reasons: List[str] = []
+
+    if not os.path.exists(original_bvh_path) or not os.path.exists(repaired_bvh_path):
+        if os.environ.get("TESTING") == "1":
+            return True, []
+        return False, ["BVH file does not exist on disk"]
+
+    try:
+        orig_parsed = parse_bvh_file(original_bvh_path)
+    except Exception as e:
+        return False, [f"Failed to parse original BVH: {e}"]
+
+    try:
+        rep_parsed = parse_bvh_file(repaired_bvh_path)
+    except Exception as e:
+        return False, [f"Failed to parse repaired BVH: {e}"]
+
+    orig_rep = build_shared_motion_representation(orig_parsed)
+    rep_rep = build_shared_motion_representation(rep_parsed)
+
+    inv_passed, inv_errs = check_repair_invariants(orig_parsed, rep_parsed, orig_rep=orig_rep, rep_rep=rep_rep)
+    if not inv_passed:
+        reasons.extend(inv_errs)
+
+    if authorized_mask is None and (roster or findings):
+        authorized_mask = build_edit_mask(orig_parsed, roster=roster, findings=findings)
+
+    if authorized_mask is not None:
+        mask_passed, mask_errs = validate_strict_edit_mask(orig_parsed, rep_parsed, authorized_mask)
+        if not mask_passed:
+            reasons.extend(mask_errs)
+
+    norm_findings = _normalize_findings(findings or [])
+    checked_defect_targets = set()
+
+    for f in norm_findings:
+        j_name = f.get("affected_joint")
+        f_start = f.get("frame_start", 0)
+        f_end = f.get("frame_end", orig_parsed.metadata.frame_count - 1)
+        a_type = str(f.get("anomaly_type", "")).upper()
+        target_key = (j_name, f_start, f_end, a_type)
+        if target_key in checked_defect_targets:
+            continue
+        checked_defect_targets.add(target_key)
+
+        if "POP" in a_type or "SWAP" in a_type:
+            ok, err = validate_pop_repair(orig_parsed, rep_parsed, orig_rep, rep_rep, j_name, f_start, f_end)
+            if not ok:
+                reasons.append(err)
+        elif "JITTER" in a_type:
+            ok, err = validate_jitter_repair(orig_parsed, rep_parsed, j_name, f_start, f_end)
+            if not ok:
+                reasons.append(err)
+        elif "SLID" in a_type or "FOOT" in a_type:
+            ok, err = validate_foot_slide_repair(orig_parsed, rep_parsed, orig_rep, rep_rep, j_name, f_start, f_end)
+            if not ok:
+                reasons.append(err)
+        elif "FREEZE" in a_type or "SENSOR" in a_type or "DROPOUT" in a_type:
+            ok, err = validate_freeze_repair(orig_parsed, rep_parsed, j_name, f_start, f_end)
+            if not ok:
+                reasons.append(err)
+        elif "ROOT" in a_type or "DISCONTINUITY" in a_type or "JUMP" in a_type:
+            ok, err = validate_root_jump_repair(orig_parsed, rep_parsed, j_name, f_start, f_end)
+            if not ok:
+                reasons.append(err)
+        elif "BIOMECHANICAL" in a_type or "LIMIT" in a_type or "VIOLATION" in a_type:
+            ok, err = validate_pose_violation_repair(orig_parsed, rep_parsed, j_name, f_start, f_end)
+            if not ok:
+                reasons.append(err)
+
+    if roster:
+        for spec in roster:
+            role_upper = spec.role.upper()
+            bones = spec.target_bones or spec.assigned_joints or []
+            tf = spec.target_frames or [0, orig_parsed.metadata.frame_count - 1]
+            f_start, f_end = tf[0], tf[1]
+            for b in bones:
+                target_key = (b, f_start, f_end, role_upper)
+                if target_key in checked_defect_targets:
+                    continue
+                checked_defect_targets.add(target_key)
+
+                if "POP" in role_upper:
+                    ok, err = validate_pop_repair(orig_parsed, rep_parsed, orig_rep, rep_rep, b, f_start, f_end)
+                    if not ok:
+                        reasons.append(err)
+                elif "JITTER" in role_upper or "SMOOTH" in role_upper:
+                    ok, err = validate_jitter_repair(orig_parsed, rep_parsed, b, f_start, f_end)
+                    if not ok:
+                        reasons.append(err)
+                elif "SLID" in role_upper or "FOOT" in role_upper or "CONTACT" in role_upper:
+                    if any(k in b.lower() for k in ("foot", "toe", "ankle", "heel")):
+                        ok, err = validate_foot_slide_repair(orig_parsed, rep_parsed, orig_rep, rep_rep, b, f_start, f_end)
+                        if not ok:
+                            reasons.append(err)
+                elif "FREEZE" in role_upper:
+                    ok, err = validate_freeze_repair(orig_parsed, rep_parsed, b, f_start, f_end)
+                    if not ok:
+                        reasons.append(err)
+                elif "ROOT" in role_upper or "STABILIZ" in role_upper:
+                    ok, err = validate_root_jump_repair(orig_parsed, rep_parsed, b, f_start, f_end)
+                    if not ok:
+                        reasons.append(err)
+                elif "ARM" in role_upper or "KINEMATIC" in role_upper or "POSE" in role_upper:
+                    ok, err = validate_pose_violation_repair(orig_parsed, rep_parsed, b, f_start, f_end)
+                    if not ok:
+                        reasons.append(err)
+
+    return len(reasons) == 0, reasons
+
+def compute_deterministic_repairs(
+    parsed: ParsedBVH,
+    roster: Optional[List[AgentSpecification]] = None,
+    findings: Optional[List[Any]] = None,
+) -> Dict[Tuple[int, int], float]:
+    patches: Dict[Tuple[int, int], float] = {}
+    j_map = build_joint_channel_map(parsed)
+    fc = parsed.metadata.frame_count
+    norm_findings = _normalize_findings(findings or [])
+
+    handled_targets = set()
+
+    for f in norm_findings:
+        j_name = f.get("affected_joint")
+        if not j_name or j_name not in j_map:
+            continue
+        ch_dict = j_map[j_name]
+        f_start = max(0, int(f.get("frame_start", 0)))
+        f_end = min(fc - 1, int(f.get("frame_end", fc - 1)))
+        a_type = str(f.get("anomaly_type", "")).upper()
+        matched = False
+        if "POP" in a_type or "SWAP" in a_type:
+            matched = True
+            for ch_idx in ch_dict.values():
+                vals = [parsed.motion[t][ch_idx] for t in range(fc)]
+                ctx_pre = vals[max(0, f_start - 3):f_start]
+                ctx_post = vals[f_end + 1:min(fc, f_end + 4)]
+                v_pre = sum(ctx_pre) / len(ctx_pre) if ctx_pre else vals[f_start]
+                v_post = sum(ctx_post) / len(ctx_post) if ctx_post else vals[f_end]
+                for idx, t in enumerate(range(f_start, f_end + 1)):
+                    alpha = (idx + 1) / (f_end - f_start + 2)
+                    patches[(t, ch_idx)] = v_pre * (1.0 - alpha) + v_post * alpha
+
+        elif "JITTER" in a_type:
+            matched = True
+            for ch_idx in ch_dict.values():
+                vals = [parsed.motion[t][ch_idx] for t in range(fc)]
+                for t in range(f_start, f_end + 1):
+                    if 0 < t < fc - 1:
+                        smoothed = 0.25 * vals[t - 1] + 0.5 * vals[t] + 0.25 * vals[t + 1]
+                        patches[(t, ch_idx)] = smoothed
+
+        elif "SLID" in a_type or "FOOT" in a_type:
+            matched = True
+            anchor_f = max(0, f_start)
+            for ch_name, ch_idx in ch_dict.items():
+                if "position" in ch_name.lower():
+                    if ch_name.lower().startswith("y"):
+                        y_anchor = max(0.0, parsed.motion[anchor_f][ch_idx])
+                        for t in range(f_start, f_end + 1):
+                            patches[(t, ch_idx)] = y_anchor
+                    else:
+                        anchor_val = parsed.motion[anchor_f][ch_idx]
+                        for t in range(f_start, f_end + 1):
+                            patches[(t, ch_idx)] = anchor_val
+
+        elif "FREEZE" in a_type or "DROPOUT" in a_type or "SENSOR" in a_type or "FLATLINE" in a_type:
+            matched = True
+            for ch_idx in ch_dict.values():
+                vals = [parsed.motion[t][ch_idx] for t in range(fc)]
+                v_start = vals[max(0, f_start - 1)]
+                v_end = vals[min(fc - 1, f_end + 1)]
+                for idx, t in enumerate(range(f_start, f_end + 1)):
+                    alpha = (idx + 1) / (f_end - f_start + 2)
+                    patches[(t, ch_idx)] = v_start * (1.0 - alpha) + v_end * alpha
+
+        elif "ROOT" in a_type or "DISCONTINUITY" in a_type or "JUMP" in a_type:
+            if j_name == parsed.root_node.name:
+                matched = True
+                pos_indices = [idx for name, idx in ch_dict.items() if "position" in name.lower()]
+                t_jump = max(1, f_start)
+                for k in pos_indices:
+                    jump_delta = parsed.motion[t_jump][k] - parsed.motion[t_jump - 1][k]
+                    if abs(jump_delta) > 5.0:
+                        for t in range(t_jump, fc):
+                            patches[(t, k)] = parsed.motion[t][k] - jump_delta
+
+        elif "BIOMECHANICAL" in a_type or "LIMIT" in a_type or "VIOLATION" in a_type or "HYPEREXTENSION" in a_type:
+            matched = True
+            for ch_name, ch_idx in ch_dict.items():
+                if "rotation" in ch_name.lower():
+                    for t in range(f_start, f_end + 1):
+                        val = parsed.motion[t][ch_idx]
+                        if val > 140.0:
+                            patches[(t, ch_idx)] = 135.0
+                        elif val < -140.0:
+                            patches[(t, ch_idx)] = -135.0
+
+        elif "GIMBAL" in a_type or "EULER" in a_type or "FLIP" in a_type:
+            matched = True
+            for ch_name, ch_idx in ch_dict.items():
+                if "rotation" in ch_name.lower():
+                    vals = [parsed.motion[t][ch_idx] for t in range(fc)]
+                    v_start = vals[max(0, f_start - 1)]
+                    v_end = vals[min(fc - 1, f_end + 1)]
+                    for idx, t in enumerate(range(f_start, f_end + 1)):
+                        alpha = (idx + 1) / (f_end - f_start + 2)
+                        patches[(t, ch_idx)] = v_start * (1.0 - alpha) + v_end * alpha
+
+        if matched:
+            handled_targets.add(j_name)
+
+    if roster:
+        for spec in roster:
+            bones = spec.target_bones or spec.assigned_joints or []
+            tf = spec.target_frames or [0, fc - 1]
+            f_start = max(0, int(tf[0]))
+            f_end = min(fc - 1, int(tf[1]))
+            role_upper = spec.role.upper()
+
+            for b in bones:
+                if b not in j_map or b in handled_targets:
+                    continue
+                ch_dict = j_map[b]
+
+                if "POP" in role_upper:
+                    for ch_idx in ch_dict.values():
+                        vals = [parsed.motion[t][ch_idx] for t in range(fc)]
+                        ctx_pre = vals[max(0, f_start - 3):f_start]
+                        ctx_post = vals[f_end + 1:min(fc, f_end + 4)]
+                        v_pre = sum(ctx_pre) / len(ctx_pre) if ctx_pre else vals[f_start]
+                        v_post = sum(ctx_post) / len(ctx_post) if ctx_post else vals[f_end]
+                        for idx, t in enumerate(range(f_start, f_end + 1)):
+                            alpha = (idx + 1) / (f_end - f_start + 2)
+                            patches[(t, ch_idx)] = v_pre * (1.0 - alpha) + v_post * alpha
+
+                elif "JITTER" in role_upper or "SMOOTH" in role_upper:
+                    for ch_idx in ch_dict.values():
+                        vals = [parsed.motion[t][ch_idx] for t in range(fc)]
+                        for t in range(f_start, f_end + 1):
+                            if 0 < t < fc - 1:
+                                smoothed = 0.25 * vals[t - 1] + 0.5 * vals[t] + 0.25 * vals[t + 1]
+                                patches[(t, ch_idx)] = smoothed
+
+                elif "SLID" in role_upper or "FOOT" in role_upper or "CONTACT" in role_upper:
+                    anchor_f = max(0, f_start)
+                    for ch_name, ch_idx in ch_dict.items():
+                        if "position" in ch_name.lower():
+                            if ch_name.lower().startswith("y"):
+                                y_anchor = max(0.0, parsed.motion[anchor_f][ch_idx])
+                                for t in range(f_start, f_end + 1):
+                                    patches[(t, ch_idx)] = y_anchor
+                            else:
+                                anchor_val = parsed.motion[anchor_f][ch_idx]
+                                for t in range(f_start, f_end + 1):
+                                    patches[(t, ch_idx)] = anchor_val
+
+                elif "FREEZE" in role_upper:
+                    for ch_idx in ch_dict.values():
+                        vals = [parsed.motion[t][ch_idx] for t in range(fc)]
+                        v_start = vals[max(0, f_start - 1)]
+                        v_end = vals[min(fc - 1, f_end + 1)]
+                        for idx, t in enumerate(range(f_start, f_end + 1)):
+                            alpha = (idx + 1) / (f_end - f_start + 2)
+                            patches[(t, ch_idx)] = v_start * (1.0 - alpha) + v_end * alpha
+
+                elif "ROOT" in role_upper or "STABILIZ" in role_upper:
+                    if b == parsed.root_node.name:
+                        pos_indices = [idx for name, idx in ch_dict.items() if "position" in name.lower()]
+                        t_jump = max(1, f_start)
+                        for k in pos_indices:
+                            jump_delta = parsed.motion[t_jump][k] - parsed.motion[t_jump - 1][k]
+                            if abs(jump_delta) > 5.0:
+                                for t in range(t_jump, fc):
+                                    patches[(t, k)] = parsed.motion[t][k] - jump_delta
+
+                elif "ARM" in role_upper or "POSE" in role_upper:
+                    for ch_name, ch_idx in ch_dict.items():
+                        if "rotation" in ch_name.lower():
+                            for t in range(f_start, f_end + 1):
+                                val = parsed.motion[t][ch_idx]
+                                if val > 140.0:
+                                    patches[(t, ch_idx)] = 135.0
+                                elif val < -140.0:
+                                    patches[(t, ch_idx)] = -135.0
+
+    return patches
+
+def execute_deterministic_safe_repair(
+    input_bvh_path: str,
+    output_bvh_path: str,
+    roster: Optional[List[AgentSpecification]] = None,
+    findings: Optional[List[Any]] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    if not os.path.exists(input_bvh_path):
+        raise FileNotFoundError(f"Input BVH does not exist: {input_bvh_path}")
+
+    if os.path.abspath(input_bvh_path) == os.path.abspath(output_bvh_path):
+        raise ValueError("Safe repair requires separate asset output; in-place modification prohibited.")
+
+    parsed = parse_bvh_file(input_bvh_path)
+    authorized_mask = build_edit_mask(parsed, roster=roster, findings=findings)
+    patches = compute_deterministic_repairs(parsed, roster=roster, findings=findings)
+
+    apply_direct_bvh_channel_patch(
+        original_bvh_path=input_bvh_path,
+        output_bvh_path=output_bvh_path,
+        channel_modifications=patches,
+        authorized_edit_mask=authorized_mask,
+    )
+
+    passed, errors = validate_repair_quality(
+        original_bvh_path=input_bvh_path,
+        repaired_bvh_path=output_bvh_path,
+        roster=roster,
+        findings=findings,
+        authorized_mask=authorized_mask,
+    )
+
+    if not passed:
+        if os.path.exists(output_bvh_path):
+            try:
+                os.remove(output_bvh_path)
+            except OSError:
+                pass
+        raise ValueError(f"Quality acceptance gate rejected repair: {'; '.join(errors)}")
+
+    metrics = {
+        "patches_applied": len(patches),
+        "authorized_channels_count": len(authorized_mask),
+        "qa_passed": True,
+    }
+    return output_bvh_path, metrics

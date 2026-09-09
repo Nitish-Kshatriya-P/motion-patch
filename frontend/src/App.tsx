@@ -1,15 +1,49 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { DragEvent } from 'react';
 import axios from 'axios';
-import SessionSidebar, { type SessionSummary } from './components/SessionSidebar';
+import SessionSidebar, { formatSessionTitle, type SessionSummary } from './components/SessionSidebar';
 import ChatStream, { type ChatMessage, type ProposedPlanData } from './components/ChatStream';
 import MultimodalPromptBar from './components/MultimodalPromptBar';
 import Viewport3D from './components/Viewport3D';
 import type { DiagnosticCardProps, FindingItem } from './components/DiagnosticCard';
 import WhiteBoxCodeDrawer from './components/WhiteBoxCodeDrawer';
 import type { ComparisonMode } from './components/ComparisonControls';
-import MotionPatchLogo, { type LogoVariant } from './components/MotionPatchLogo';
-import BrandStudioModal from './components/BrandStudioModal';
+import MotionPatchLogo from './components/MotionPatchLogo';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
+import { Keyboard } from 'lucide-react';
+
+function mapFindingToInterval(f: any): FindingItem {
+  const frameStart = Number(f.frame_start ?? 0);
+  const frameEnd = Number(f.frame_end ?? frameStart);
+  const peakFrame = f.peak_frame != null ? Number(f.peak_frame) : frameStart;
+  const playbackStart = f.playback_frame_start != null ? Number(f.playback_frame_start) : Math.max(0, frameStart - 15);
+  const playbackEnd = f.playback_frame_end != null ? Number(f.playback_frame_end) : frameEnd + 15;
+  const jointName = f.affected_joint || f.joint || 'Unknown';
+
+  return {
+    finding_id: f.finding_id,
+    joint: jointName,
+    affected_joint: jointName,
+    frame_start: frameStart,
+    frame_end: frameEnd,
+    display_frame_start: f.display_frame_start != null ? Number(f.display_frame_start) : frameStart + 1,
+    display_frame_end: f.display_frame_end != null ? Number(f.display_frame_end) : frameEnd + 1,
+    peak_frame: peakFrame,
+    display_peak_frame: f.display_peak_frame != null ? Number(f.display_peak_frame) : peakFrame + 1,
+    playback_frame_start: playbackStart,
+    playback_frame_end: playbackEnd,
+    display_playback_frame_start: f.display_playback_frame_start != null ? Number(f.display_playback_frame_start) : playbackStart + 1,
+    display_playback_frame_end: f.display_playback_frame_end != null ? Number(f.display_playback_frame_end) : playbackEnd + 1,
+    time_start: Number(f.time_start ?? 0),
+    time_end: Number(f.time_end ?? 0),
+    anomaly_type: f.anomaly_type,
+    severity: f.severity,
+    confidence: f.confidence != null ? Number(f.confidence) : undefined,
+    verdict: f.verdict || undefined,
+    evidence: f.evidence || undefined,
+    explanation: f.explanation || '',
+  };
+}
 
 export default function App() {
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('repaired');
@@ -25,7 +59,15 @@ export default function App() {
   const [currentScriptCode, setCurrentScriptCode] = useState<string>('');
   const [isExecutingScript, setIsExecutingScript] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('motionpatch_sidebar_open');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const [sessionUploadCount, setSessionUploadCount] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
@@ -40,14 +82,16 @@ export default function App() {
     joint?: string;
     timestamp?: number;
   } | null>(null);
-  const [logoVariant, setLogoVariant] = useState<LogoVariant>(() => {
-    try {
-      return (localStorage.getItem('motionpatch_logo_variant') as LogoVariant) || 'suture';
-    } catch {
-      return 'suture';
-    }
-  });
-  const [isBrandStudioOpen, setIsBrandStudioOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const handleToggleSidebar = useCallback(() => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('motionpatch_sidebar_open', String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -96,6 +140,7 @@ export default function App() {
     setIsUploading(false);
     setIsGenerating(false);
     setStagedFile(null);
+    setSessionUploadCount(0);
   }, []);
 
   useEffect(() => {
@@ -106,26 +151,41 @@ export default function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault();
-        setIsSidebarOpen((prev) => !prev);
+        handleToggleSidebar();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         handleNewSession();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault();
         setIsCodeDrawerOpen((prev) => !prev);
+      } else if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setIsShortcutsOpen((prev) => !prev);
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [handleNewSession]);
+  }, [handleNewSession, handleToggleSidebar]);
 
   const handleSelectSession = async (session: SessionSummary) => {
     setActiveSessionId(session.session_id);
-    setActiveFilename(session.filename);
+    const sessionTitle = formatSessionTitle(session);
+    setActiveFilename(sessionTitle);
     setActivePlanId(session.plan_id || null);
     setActiveApprovalId(session.approval_id || null);
+
+    try {
+      const filesRes = await axios.get(`http://localhost:8000/sessions/${session.session_id}/files`);
+      if (typeof filesRes.data?.count === 'number') {
+        setSessionUploadCount(filesRes.data.count);
+      } else {
+        setSessionUploadCount(1);
+      }
+    } catch {
+      setSessionUploadCount(1);
+    }
 
     const isCompleted = session.lifecycle_state === 'COMPLETED';
     const repId = session.repaired_asset_id || (isCompleted ? session.asset_id : null);
@@ -144,13 +204,19 @@ export default function App() {
       }
 
       const isApproved = session.lifecycle_state === 'APPROVED' && Boolean(session.approval_id);
+      const rawIntervals = summaryData.findings || summaryData.frame_intervals || [];
+      const intervals: FindingItem[] = rawIntervals.map(mapFindingToInterval);
+      const brokenJoints = summaryData.broken_joints && summaryData.broken_joints.length > 0
+        ? summaryData.broken_joints
+        : Array.from(new Set(intervals.map((f) => f.affected_joint || f.joint))).filter(Boolean);
+
       const cardProps: DiagnosticCardProps = {
         analysisId: summaryData.analysis_id,
         sessionId: session.session_id,
         status: summaryData.status,
         summary: summaryData.summary,
-        brokenJoints: summaryData.broken_joints || [],
-        frameIntervals: summaryData.frame_intervals || [],
+        brokenJoints,
+        frameIntervals: intervals,
         durationSeconds: summaryData.duration_seconds || 0,
         frameCount: summaryData.frame_count || 0,
         fps: summaryData.fps || 30,
@@ -158,7 +224,6 @@ export default function App() {
         approvalId: session.approval_id || undefined,
       };
 
-      const intervals = summaryData.frame_intervals || [];
       setActiveBrokenIntervals(intervals);
       setActiveTotalFrames(summaryData.frame_count || 0);
       setActiveFps(summaryData.fps || 30);
@@ -169,13 +234,13 @@ export default function App() {
           id: `load-${session.session_id}-user`,
           sender: 'user',
           timestamp: session.created_at,
-          text: `Opened session: ${session.filename}`,
+          text: `Opened session: ${sessionTitle}`,
         },
         {
           id: `load-${session.session_id}-assistant`,
           sender: 'assistant',
           timestamp: session.created_at,
-          text: `Retrieved kinematic diagnostic record for asset ${session.filename}.`,
+          text: `Retrieved kinematic diagnostic record for asset ${sessionTitle}.`,
           diagnosticData: cardProps,
           sessionId: session.session_id,
           isApproved,
@@ -189,7 +254,7 @@ export default function App() {
           id: `load-error-${Date.now()}`,
           sender: 'assistant',
           timestamp: new Date().toISOString(),
-          text: `Loaded session ${session.filename}, but could not retrieve diagnostic narrative.`,
+          text: `Loaded session ${sessionTitle}, but could not retrieve diagnostic narrative.`,
         },
       ]);
     }
@@ -197,6 +262,18 @@ export default function App() {
 
   const handleFileUpload = async (file: File, userPrompt?: string) => {
     if (!file.name.toLowerCase().endsWith('.bvh')) {
+      return;
+    }
+
+    if (sessionUploadCount >= 5) {
+      setStagedFile(null);
+      const limitMsg: ChatMessage = {
+        id: `limit-${Date.now()}`,
+        sender: 'assistant',
+        timestamp: new Date().toISOString(),
+        text: 'Upload limit reached: A maximum of 5 files can be uploaded in a single chat session. Start a new thread (Cmd+N) to analyze more files.',
+      };
+      setMessages((prev) => [...prev, limitMsg]);
       return;
     }
 
@@ -219,6 +296,9 @@ export default function App() {
     if (userPrompt) {
       formData.append('prompt', userPrompt);
     }
+    if (activeSessionId) {
+      formData.append('session_id', activeSessionId);
+    }
 
     try {
       const res = await axios.post('http://localhost:8000/upload', formData, {
@@ -233,20 +313,15 @@ export default function App() {
       setRepairedBvhId(null);
       setActiveSessionId(data.session_id);
       setActiveFilename(file.name);
+      if (typeof data.uploaded_files_count === 'number') {
+        setSessionUploadCount(data.uploaded_files_count);
+      } else {
+        setSessionUploadCount((prev) => prev + 1);
+      }
 
       const findings = data.findings || [];
-      const brokenJoints = Array.from(new Set(findings.map((f: any) => f.affected_joint))) as string[];
-      const frameIntervals = findings.map((f: any) => ({
-        finding_id: f.finding_id,
-        joint: f.affected_joint,
-        frame_start: f.frame_start,
-        frame_end: f.frame_end,
-        time_start: f.time_start,
-        time_end: f.time_end,
-        anomaly_type: f.anomaly_type,
-        severity: f.severity,
-        explanation: f.explanation,
-      }));
+      const frameIntervals: FindingItem[] = findings.map(mapFindingToInterval);
+      const brokenJoints = Array.from(new Set(frameIntervals.map((f) => f.affected_joint || f.joint))).filter(Boolean) as string[];
 
       const diagnosticData: DiagnosticCardProps = {
         analysisId: data.analysis_id,
@@ -742,6 +817,16 @@ export default function App() {
   const handleWindowDrop = (e: DragEvent) => {
     e.preventDefault();
     setIsDragOverWindow(false);
+    if (sessionUploadCount >= 5) {
+      const limitMsg: ChatMessage = {
+        id: `limit-${Date.now()}`,
+        sender: 'assistant',
+        timestamp: new Date().toISOString(),
+        text: 'Upload limit reached: A maximum of 5 files can be uploaded in a single chat session. Start a new thread (Cmd+N) to analyze more files.',
+      };
+      setMessages((prev) => [...prev, limitMsg]);
+      return;
+    }
     const file = e.dataTransfer.files?.[0];
     if (file && file.name.toLowerCase().endsWith('.bvh')) {
       setStagedFile(file);
@@ -758,15 +843,14 @@ export default function App() {
       className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-100 overflow-hidden font-sans antialiased"
     >
       <header className="h-11 border-b border-white/[0.08] bg-[#090c13] backdrop-blur-2xl flex items-center justify-between px-4 shrink-0 select-none z-30">
-        <div
-          className="flex items-center gap-2.5 cursor-pointer group"
-          onClick={() => setIsBrandStudioOpen(true)}
-          title="Open Brand Symbol Studio"
-        >
-          <div className="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-[0_0_12px_rgba(37,99,235,0.4)] transition-transform duration-150 group-hover:scale-105 active:scale-95">
-            <MotionPatchLogo variant={logoVariant} size="sm" className="text-white" />
+        <div className="flex items-center gap-2.5">
+
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-[0_0_12px_rgba(37,99,235,0.4)]">
+              <MotionPatchLogo size="sm" className="text-white" />
+            </div>
+            <span className="font-semibold text-sm tracking-tight text-white font-display">MotionPatch</span>
           </div>
-          <span className="font-semibold text-sm tracking-tight text-white font-display">MotionPatch</span>
         </div>
 
         {activeFilename && hasActiveWorkspace ? (
@@ -778,38 +862,100 @@ export default function App() {
           </div>
         ) : null}
 
-        <div className="w-6" />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="keyboard-shortcuts-btn"
+            onClick={() => setIsShortcutsOpen(true)}
+            className="px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] border border-transparent hover:border-white/[0.08] transition-colors flex items-center gap-1.5 cursor-pointer"
+            title="Keyboard Shortcuts (?)"
+          >
+            <Keyboard className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-[11px] hidden sm:inline">Shortcuts</span>
+            <kbd className="px-1 py-0.2 rounded bg-zinc-800 border border-white/[0.1] text-[9px] font-mono text-zinc-400">?</kbd>
+          </button>
+        </div>
       </header>
 
-      {!hasActiveWorkspace ? (
-        <main className="flex-1 flex flex-col items-center justify-center p-6 overflow-y-auto relative bg-[#080a10]">
-          {isDragOverWindow && (
-            <div className="absolute inset-0 z-50 bg-blue-950/80 border-2 border-dashed border-blue-400/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 pointer-events-none">
-              <p className="text-base font-semibold text-blue-200">Drop BVH file to stage for analysis</p>
-              <p className="text-xs text-blue-400">Release mouse to stage file in the composer</p>
+      <div className="flex-1 flex flex-row overflow-hidden relative">
+        {isDragOverWindow && (
+          <div className="absolute inset-0 z-50 bg-blue-950/80 border-2 border-dashed border-blue-400/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 pointer-events-none">
+            <p className="text-base font-semibold text-blue-200">Drop BVH file to stage for analysis</p>
+            <p className="text-xs text-blue-400">Release mouse to stage file in the composer</p>
+          </div>
+        )}
+
+        <SessionSidebar
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          isOpen={isSidebarOpen}
+          onToggleOpen={handleToggleSidebar}
+          isLoading={isLoadingSessions}
+        />
+
+        {!hasActiveWorkspace ? (
+          <main className="flex-1 flex flex-col items-center justify-center p-6 overflow-y-auto relative bg-[#080a10]">
+            <div className="flex flex-col items-center justify-center text-center max-w-2xl w-full mx-auto gap-6 my-auto py-6">
+              <div className="w-14 h-14 rounded-2xl bg-blue-950/70 border border-blue-800/60 flex items-center justify-center text-blue-400 shadow-[0_0_24px_rgba(37,99,235,0.35)] select-none">
+                <MotionPatchLogo size={28} className="text-blue-400" />
+              </div>
+
+              <div className="flex flex-col gap-2 max-w-md">
+                <h1 className="text-2xl font-bold font-display text-white tracking-tight">
+                  What motion would you like to inspect?
+                </h1>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Attach a <span className="text-blue-400 font-mono">.bvh</span> file to inspect kinematic trajectories, detect anomalies, and execute multi-agent repairs.
+                </p>
+              </div>
+
+              <div className="w-full">
+                <MultimodalPromptBar
+                  onSendMessage={handleSendMessage}
+                  onFileUpload={handleFileUpload}
+                  disabled={isUploading || isGenerating}
+                  isGenerating={isGenerating}
+                  externalStagedFile={stagedFile}
+                  onClearExternalStagedFile={() => setStagedFile(null)}
+                  uploadCount={sessionUploadCount}
+                  maxUploads={5}
+                />
+              </div>
             </div>
-          )}
+          </main>
+        ) : (
+          <>
+            <main className="w-[60%] h-full flex flex-col overflow-hidden bg-zinc-950 relative border-r border-white/[0.08]">
+              <Viewport3D
+                bvhId={activeBvhId}
+                originalBvhId={originalBvhId}
+                repairedBvhId={repairedBvhId}
+                filename={activeFilename}
+                brokenIntervals={activeBrokenIntervals}
+                totalFrames={activeTotalFrames}
+                fps={activeFps}
+                selectedFinding={selectedFinding}
+                mode={comparisonMode}
+                onModeChange={setComparisonMode}
+                showIdleOverlay={false}
+              />
+            </main>
 
-          <div className="flex flex-col items-center justify-center text-center max-w-2xl w-full mx-auto gap-6 my-auto">
-            <button
-              type="button"
-              onClick={() => setIsBrandStudioOpen(true)}
-              title="Customize MotionPatch brand mark"
-              className="w-14 h-14 rounded-2xl bg-blue-950/70 border border-blue-800/60 flex items-center justify-center text-blue-400 shadow-[0_0_24px_rgba(37,99,235,0.35)] hover:scale-105 transition-all cursor-pointer"
-            >
-              <MotionPatchLogo variant={logoVariant} size={28} className="text-blue-400" />
-            </button>
-
-            <div className="flex flex-col gap-2 max-w-md">
-              <h1 className="text-2xl font-bold font-display text-white tracking-tight">
-                What motion would you like to inspect?
-              </h1>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Attach a <span className="text-blue-400 font-mono">.bvh</span> file to inspect kinematic trajectories, detect anomalies, and execute multi-agent repairs.
-              </p>
-            </div>
-
-            <div className="w-full">
+            <section className="w-[40%] shrink-0 flex flex-col h-full bg-[#0a0d14] overflow-hidden shadow-2xl z-10">
+              <ChatStream
+                messages={messages}
+                activeSessionId={activeSessionId}
+                onSelectFinding={handleSelectFinding}
+                onDropFile={handleFileUpload}
+                isUploading={isUploading}
+                isGenerating={isGenerating}
+                onApproveRepair={handleApproveRepair}
+                onDeclineRepair={handleDeclineRepair}
+                onInspectCode={handleInspectCode}
+                onAuthorizeProposedPlan={handleAuthorizeProposedPlan}
+              />
               <MultimodalPromptBar
                 onSendMessage={handleSendMessage}
                 onFileUpload={handleFileUpload}
@@ -817,71 +963,15 @@ export default function App() {
                 isGenerating={isGenerating}
                 externalStagedFile={stagedFile}
                 onClearExternalStagedFile={() => setStagedFile(null)}
+                diagnosticStatus={activeBrokenIntervals.length === 0 && activeSessionId ? 'CLEAN' : undefined}
+                hasAnomalies={activeBrokenIntervals.length > 0}
+                uploadCount={sessionUploadCount}
+                maxUploads={5}
               />
-            </div>
-          </div>
-        </main>
-      ) : (
-        <div className="flex-1 flex flex-row overflow-hidden relative">
-          {isDragOverWindow && (
-            <div className="absolute inset-0 z-50 bg-blue-950/80 border-2 border-dashed border-blue-400/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 pointer-events-none">
-              <p className="text-base font-semibold text-blue-200">Drop BVH file to stage for analysis</p>
-              <p className="text-xs text-blue-400">Release mouse to stage file in the composer</p>
-            </div>
-          )}
-
-          <SessionSidebar
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            onSelectSession={handleSelectSession}
-            onNewSession={handleNewSession}
-            isOpen={isSidebarOpen}
-            onToggleOpen={() => setIsSidebarOpen(!isSidebarOpen)}
-            isLoading={isLoadingSessions}
-          />
-
-          <main className="w-[60%] h-full flex flex-col overflow-hidden bg-zinc-950 relative border-r border-white/[0.08]">
-            <Viewport3D
-              bvhId={activeBvhId}
-              originalBvhId={originalBvhId}
-              repairedBvhId={repairedBvhId}
-              filename={activeFilename}
-              brokenIntervals={activeBrokenIntervals}
-              totalFrames={activeTotalFrames}
-              fps={activeFps}
-              selectedFinding={selectedFinding}
-              mode={comparisonMode}
-              onModeChange={setComparisonMode}
-              showIdleOverlay={false}
-            />
-          </main>
-
-          <section className="w-[40%] shrink-0 flex flex-col h-full bg-[#0a0d14] overflow-hidden shadow-2xl z-10">
-            <ChatStream
-              messages={messages}
-              activeSessionId={activeSessionId}
-              onSelectFinding={handleSelectFinding}
-              onDropFile={handleFileUpload}
-              isUploading={isUploading}
-              isGenerating={isGenerating}
-              onApproveRepair={handleApproveRepair}
-              onDeclineRepair={handleDeclineRepair}
-              onInspectCode={handleInspectCode}
-              onAuthorizeProposedPlan={handleAuthorizeProposedPlan}
-            />
-            <MultimodalPromptBar
-              onSendMessage={handleSendMessage}
-              onFileUpload={handleFileUpload}
-              disabled={isUploading || isGenerating}
-              isGenerating={isGenerating}
-              externalStagedFile={stagedFile}
-              onClearExternalStagedFile={() => setStagedFile(null)}
-              diagnosticStatus={activeBrokenIntervals.length === 0 && activeSessionId ? 'CLEAN' : undefined}
-              hasAnomalies={activeBrokenIntervals.length > 0}
-            />
-          </section>
-        </div>
-      )}
+            </section>
+          </>
+        )}
+      </div>
 
       <WhiteBoxCodeDrawer
         isOpen={isCodeDrawerOpen}
@@ -891,11 +981,9 @@ export default function App() {
         isExecuting={isExecutingScript}
       />
 
-      <BrandStudioModal
-        isOpen={isBrandStudioOpen}
-        onClose={() => setIsBrandStudioOpen(false)}
-        activeVariant={logoVariant}
-        onSelectVariant={setLogoVariant}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
       />
     </div>
   );

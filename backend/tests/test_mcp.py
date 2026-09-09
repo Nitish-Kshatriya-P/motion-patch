@@ -254,6 +254,18 @@ def test_zero_comments_rule():
         os.path.join(project_root, "init_clickhouse.py"),
         os.path.join(project_root, "mcp_server.py"),
         os.path.join(project_root, "agent.py"),
+        os.path.join(project_root, "models.py"),
+        os.path.join(project_root, "bvh_parser.py"),
+        os.path.join(project_root, "detector.py"),
+        os.path.join(project_root, "tests", "benchmark_data.py"),
+        os.path.join(project_root, "tests", "test_detector.py"),
+        os.path.join(project_root, "batch_orchestrator.py"),
+        os.path.join(project_root, "main.py"),
+        os.path.join(project_root, "tests", "test_contract.py"),
+        os.path.join(project_root, "tests", "test_shared_motion.py"),
+        os.path.join(project_root, "tests", "test_safe_repair.py"),
+        os.path.join(project_root, "tests", "test_chunking_equivalence.py"),
+        os.path.join(project_root, "tests", "validate_performance.py"),
         os.path.join(project_root, "tests", "test_mcp.py"),
     ]
     violations = []

@@ -13,7 +13,6 @@ describe('MultimodalPromptBar', () => {
     expect(screen.getByPlaceholderText(/Ask MotionPatch AI or describe kinematic adjustments/i)).toBeInTheDocument();
     expect(screen.getByTitle('Attach .bvh file')).toBeInTheDocument();
     expect(screen.getByTitle('Send message')).toBeInTheDocument();
-    expect(screen.getByText('↵')).toBeInTheDocument();
   });
 
   it('submits message on Enter keypress and clears input', () => {
@@ -127,5 +126,39 @@ describe('MultimodalPromptBar', () => {
     expect(sendBtn).toBeDisabled();
     fireEvent.click(sendBtn);
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('displays quota badge when uploadCount and maxUploads are provided', () => {
+    const onSend = vi.fn();
+    const onUpload = vi.fn();
+
+    render(
+      <MultimodalPromptBar
+        onSendMessage={onSend}
+        onFileUpload={onUpload}
+        uploadCount={2}
+        maxUploads={5}
+      />
+    );
+
+    expect(screen.getByText('BVH (2/5)')).toBeInTheDocument();
+  });
+
+  it('disables attach button and blocks file staging when upload limit is reached', () => {
+    const onSend = vi.fn();
+    const onUpload = vi.fn();
+
+    render(
+      <MultimodalPromptBar
+        onSendMessage={onSend}
+        onFileUpload={onUpload}
+        uploadCount={5}
+        maxUploads={5}
+      />
+    );
+
+    const attachBtn = screen.getByTitle('Upload limit reached (5/5 files in this session)');
+    expect(attachBtn).toBeDisabled();
+    expect(screen.getByText('BVH (5/5)')).toBeInTheDocument();
   });
 });

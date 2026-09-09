@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Upload, AlertCircle, Loader2, Send, FileCode, CheckCircle, Download, Clock, PlayCircle } from 'lucide-react';
-import { extractError, getAudioExtension } from '../utils';
+import { extractError } from '../utils';
 
 
 type Status = "PENDING" | "PROCESSING" | "GENERATING_SCRIPT" | "RUNNING_JOB" | "COMPLETED" | "FAILED";

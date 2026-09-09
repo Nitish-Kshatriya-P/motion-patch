@@ -1,10 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import axios from 'axios';
 import { Upload, AlertCircle, Loader2 } from 'lucide-react';
 import { extractError } from '../utils';
 
 interface UploadFormProps {
-  onUploadSuccess: (id: string) => void;
+  onUploadSuccess: (id: string, uploadData?: any) => void;
 }
 
 export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
@@ -32,7 +32,7 @@ export default function UploadForm({ onUploadSuccess }: UploadFormProps) {
           'Content-Type': 'multipart/form-data',
         },
       });
-      onUploadSuccess(response.data.id);
+      onUploadSuccess(response.data.id, response.data);
     } catch (err: any) {
       console.error(err);
       setError(extractError(err));

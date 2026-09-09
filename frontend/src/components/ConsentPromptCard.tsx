@@ -143,13 +143,46 @@ export default function ConsentPromptCard({
     if (isApproved || isDeclined) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA';
+
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        if (!showCustomPrompt && !showJointSelector) {
-          e.preventDefault();
+        e.preventDefault();
+        if (showJointSelector) {
+          handleApprove(selectedJoints);
+        } else {
           handleApprove();
         }
-      } else if ((e.metaKey || e.ctrlKey) && e.key === 'Backspace') {
-        if (!showCustomPrompt) {
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (showCustomPrompt) {
+          e.preventDefault();
+          setShowCustomPrompt(false);
+          return;
+        }
+        if (showJointSelector) {
+          e.preventDefault();
+          setShowJointSelector(false);
+          return;
+        }
+        e.preventDefault();
+        handleDecline();
+        return;
+      }
+
+      if (!isInput && !showCustomPrompt && !showJointSelector) {
+        if (e.key === '1') {
+          e.preventDefault();
+          handleApprove();
+        } else if (e.key === '2') {
+          e.preventDefault();
+          setShowJointSelector(true);
+        } else if (e.key === '3') {
+          e.preventDefault();
+          setShowCustomPrompt(true);
+        } else if (e.key === '4') {
           e.preventDefault();
           handleDecline();
         }
@@ -158,7 +191,7 @@ export default function ConsentPromptCard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isApproved, isDeclined, showCustomPrompt, showJointSelector, findingIds, customPrompt, sessionId, analysisId]);
+  }, [isApproved, isDeclined, showCustomPrompt, showJointSelector, selectedJoints, findingIds, customPrompt, sessionId, analysisId]);
 
   const toggleJoint = (joint: string) => {
     setSelectedJoints((prev) =>
@@ -304,7 +337,17 @@ export default function ConsentPromptCard({
               );
             })}
           </div>
-          <div className="flex justify-end pt-1">
+          <div className="flex justify-end pt-1 gap-2">
+            <button
+              type="button"
+              onClick={() => setShowJointSelector(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white transition-colors border border-white/[0.15] cursor-pointer flex items-center gap-1"
+            >
+              <span>Cancel</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-zinc-700 border border-white/[0.15] text-[9px] font-mono text-zinc-400 ml-1">
+                Esc
+              </kbd>
+            </button>
             <button
               type="button"
               onClick={() => handleApprove(selectedJoints)}
@@ -313,6 +356,9 @@ export default function ConsentPromptCard({
             >
               {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               <span>Approve Selected Joints</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-blue-700/80 border border-blue-400/50 text-[9px] font-mono text-blue-100 ml-1">
+                ⌘↵
+              </kbd>
             </button>
           </div>
         </div>
@@ -338,9 +384,12 @@ export default function ConsentPromptCard({
               type="button"
               onClick={() => setShowCustomPrompt(false)}
               disabled={isLoading}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white transition-colors border border-white/[0.15] disabled:opacity-50 cursor-pointer"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white transition-colors border border-white/[0.15] disabled:opacity-50 cursor-pointer flex items-center gap-1"
             >
-              Cancel
+              <span>Cancel</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-zinc-700 border border-white/[0.15] text-[9px] font-mono text-zinc-400 ml-1">
+                Esc
+              </kbd>
             </button>
             <button
               type="button"
@@ -358,6 +407,9 @@ export default function ConsentPromptCard({
                 <>
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Approve & Spawn Agents</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-blue-700/80 border border-blue-400/50 text-[9px] font-mono text-blue-100 ml-1">
+                    ⌘↵
+                  </kbd>
                 </>
               )}
             </button>
@@ -399,7 +451,10 @@ export default function ConsentPromptCard({
             className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-800/90 hover:bg-zinc-700 text-zinc-100 hover:text-white transition-colors flex items-center gap-1.5 border border-white/[0.15] disabled:opacity-50 cursor-pointer"
           >
             <Target className="w-3.5 h-3.5 text-blue-400" />
-            <span>Select Specific Joints/Frames...</span>
+            <span>Select Specific Joints & Frames</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-zinc-700/80 border border-white/[0.15] text-[9px] font-mono text-zinc-300 ml-1">
+              2
+            </kbd>
           </button>
 
           <button
@@ -414,6 +469,9 @@ export default function ConsentPromptCard({
           >
             <Sliders className="w-3.5 h-3.5 text-zinc-300" />
             <span>Custom Instruction</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-zinc-700/80 border border-white/[0.15] text-[9px] font-mono text-zinc-300 ml-1">
+              3
+            </kbd>
           </button>
 
           <button
@@ -425,6 +483,9 @@ export default function ConsentPromptCard({
           >
             <XCircle className="w-3.5 h-3.5" />
             <span>Decline / Keep Original</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 border border-white/[0.15] text-[9px] font-mono text-zinc-400 ml-1">
+              Esc
+            </kbd>
           </button>
         </div>
       )}
