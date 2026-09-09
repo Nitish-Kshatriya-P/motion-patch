@@ -8,4 +8,5 @@ frontend/node_modules/
 .pytest_cache/
 *.db
 frontend/dist/
+docs/
 tools/
