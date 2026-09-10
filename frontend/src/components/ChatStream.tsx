@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { DragEvent } from 'react';
-import { Bot, Sparkles, UploadCloud } from 'lucide-react';
+import { Bot, Sparkles, UploadCloud, Loader2 } from 'lucide-react';
 import DiagnosticCard, { type DiagnosticCardProps } from './DiagnosticCard';
 import ConsentPromptCard from './ConsentPromptCard';
 import DynamicAgentRosterCard, { type DynamicAgent } from './DynamicAgentRosterCard';
@@ -150,8 +150,25 @@ export default function ChatStream({
               <span>Drop BVH file or type instruction</span>
             </div>
           </div>
-        ) : (
-          messages.map((msg) => {
+        ) : (() => {
+          const lastUnhandledConsentIdx = (() => {
+            for (let i = messages.length - 1; i >= 0; i--) {
+              const m = messages[i];
+              if (
+                m.diagnosticData?.frameIntervals &&
+                m.diagnosticData.frameIntervals.length > 0 &&
+                !m.isApproved &&
+                !m.diagnosticData.isApproved &&
+                !m.isDeclined &&
+                !m.diagnosticData.isDeclined
+              ) {
+                return i;
+              }
+            }
+            return -1;
+          })();
+
+          return messages.map((msg, idx) => {
             const isUser = msg.sender === 'user';
             const formattedTime = msg.timestamp
               ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -238,6 +255,7 @@ export default function ChatStream({
                           initialApproved={msg.isApproved ?? msg.diagnosticData.isApproved}
                           initialApprovalId={msg.approvalId ?? msg.diagnosticData.approvalId}
                           initialDeclined={msg.isDeclined ?? msg.diagnosticData.isDeclined}
+                          isActive={idx === lastUnhandledConsentIdx}
                           onApproved={(planId, approvalId, customPrompt, selectedJoints) => {
                             onApproveRepair?.(msg.id, planId, approvalId, customPrompt, selectedJoints);
                           }}
@@ -256,6 +274,27 @@ export default function ChatStream({
                     />
                   )}
 
+                  {msg.agentRoster && msg.agentRoster.length === 0 && (
+                    <div
+                      data-testid="agent-roster-synthesizing"
+                      className="w-full bg-zinc-900/90 border border-blue-500/30 rounded-xl p-3.5 shadow-xl flex items-center justify-between font-sans animate-pulse"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-blue-950/80 border border-blue-800/80 text-blue-400 flex items-center justify-center shrink-0">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-xs text-zinc-100">Spawning Specialized Agents...</span>
+                          <span className="text-[11px] text-zinc-400 font-mono">Synthesizing kinematic solver pipeline in background</span>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-blue-950/80 text-blue-300 border border-blue-800/80 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
+                        <span>Active</span>
+                      </span>
+                    </div>
+                  )}
+
                   {msg.repairData && (
                     <RepairCompleteCard
                       {...msg.repairData}
@@ -265,8 +304,8 @@ export default function ChatStream({
                 </div>
               </div>
             );
-          })
-        )}
+          });
+        })()}
 
         {isUploading && (
           <div className="flex items-center gap-2.5 bg-zinc-900 border border-blue-900/60 text-blue-300 px-3.5 py-2.5 rounded-xl shadow-lg w-fit text-xs">

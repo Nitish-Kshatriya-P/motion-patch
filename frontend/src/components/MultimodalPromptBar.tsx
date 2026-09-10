@@ -27,7 +27,7 @@ export default function MultimodalPromptBar({
   diagnosticStatus,
   hasAnomalies,
   uploadCount,
-  maxUploads = 5,
+  maxUploads,
 }: MultimodalPromptBarProps) {
   const [prompt, setPrompt] = useState('');
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -35,7 +35,11 @@ export default function MultimodalPromptBar({
   const [internalStagedFile, setInternalStagedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const isAtUploadLimit = typeof uploadCount === 'number' && uploadCount >= maxUploads;
+  const isAtUploadLimit =
+    typeof uploadCount === 'number' &&
+    typeof maxUploads === 'number' &&
+    uploadCount >= maxUploads;
+
   const stagedFile = externalStagedFile ?? internalStagedFile;
 
   const clearStaged = () => {
@@ -95,10 +99,6 @@ export default function MultimodalPromptBar({
   };
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    if (isAtUploadLimit) {
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      return;
-    }
     const file = e.target.files?.[0];
     if (file && file.name.toLowerCase().endsWith('.bvh')) {
       setInternalStagedFile(file);
@@ -109,9 +109,7 @@ export default function MultimodalPromptBar({
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isAtUploadLimit) {
-      setIsDragOver(true);
-    }
+    setIsDragOver(true);
   };
 
   const handleDragLeave = (e: DragEvent) => {
@@ -124,7 +122,6 @@ export default function MultimodalPromptBar({
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
-    if (isAtUploadLimit) return;
     const file = e.dataTransfer.files?.[0];
     if (file && file.name.toLowerCase().endsWith('.bvh')) {
       setInternalStagedFile(file);
@@ -195,7 +192,7 @@ export default function MultimodalPromptBar({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`p-3 bg-[#080b11] border-t border-white/[0.08] transition-all flex flex-col gap-2 select-none ${
+      className={`p-2 sm:p-3 bg-[#080b11] border-t border-white/[0.08] transition-all flex flex-col gap-2 select-none ${
         isDragOver ? 'bg-blue-950/20 border-blue-500/80' : ''
       }`}
     >
@@ -206,7 +203,7 @@ export default function MultimodalPromptBar({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUpOrLeave}
         onMouseLeave={handleMouseUpOrLeave}
-        className="flex items-center gap-1.5 overflow-x-auto pb-0.5 cursor-grab active:cursor-grabbing no-scrollbar"
+        className="flex items-center gap-1.5 overflow-x-auto pb-0.5 cursor-grab active:cursor-grabbing no-scrollbar touch-pan-x"
       >
         {quickActions.map((action) => {
           const Icon = action.Icon;
@@ -300,17 +297,10 @@ export default function MultimodalPromptBar({
               title={
                 isAtUploadLimit
                   ? `Upload limit reached (${uploadCount}/${maxUploads} files in this session)`
-                  : "Attach .bvh file"
+                  : 'Attach .bvh file'
               }
             >
               <Paperclip className="w-3.5 h-3.5" />
-              <span
-                className={`text-[10px] font-mono ${
-                  isAtUploadLimit ? "text-amber-400/90 font-medium" : "text-zinc-500"
-                }`}
-              >
-                BVH{typeof uploadCount === "number" ? ` (${uploadCount}/${maxUploads})` : ""}
-              </span>
             </button>
 
             <HoldToSpeakButton

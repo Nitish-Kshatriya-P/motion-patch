@@ -78,4 +78,36 @@ describe('DynamicAgentRosterCard', () => {
     const { container } = render(<DynamicAgentRosterCard agents={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('renders active background indicator and progress animation when workers are active', () => {
+    render(<DynamicAgentRosterCard agents={sampleAgents} />);
+    expect(screen.getByTestId('agent-active-badge')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-work-progress-bar')).toBeInTheDocument();
+  });
+
+  it('stops spinners and active indicator when agents are completed or failed', () => {
+    const finishedAgents: DynamicAgent[] = [
+      {
+        agent_id: 'agent-fixed',
+        role: 'Foot Sliding Worker',
+        status: 'COMPLETED',
+      },
+      {
+        agent_id: 'agent-failed',
+        role: 'Spine Jitter Worker',
+        status: 'FAILED',
+      },
+    ];
+
+    render(<DynamicAgentRosterCard agents={finishedAgents} />);
+
+    expect(screen.queryByTestId('agent-active-badge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('agent-work-progress-bar')).not.toBeInTheDocument();
+
+    expect(screen.getByTestId('status-icon-completed-agent-fixed')).toBeInTheDocument();
+    expect(screen.queryByTestId('status-icon-spinner-agent-fixed')).not.toBeInTheDocument();
+
+    expect(screen.getByTestId('status-icon-failed-agent-failed')).toBeInTheDocument();
+    expect(screen.queryByTestId('status-icon-spinner-agent-failed')).not.toBeInTheDocument();
+  });
 });

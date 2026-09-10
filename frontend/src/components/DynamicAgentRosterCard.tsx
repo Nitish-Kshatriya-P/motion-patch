@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, CheckCircle2, Database, Activity, Code2, ChevronDown, ChevronUp, Footprints, Compass, Copy, Check } from 'lucide-react';
+import { Bot, CheckCircle2, Database, Activity, Code2, ChevronDown, ChevronUp, Footprints, Compass, Copy, Check, Loader2, XCircle } from 'lucide-react';
 
 export type AgentActivityStatus =
   | 'SPAWNED'
@@ -86,6 +86,21 @@ export default function DynamicAgentRosterCard({
     }, 2000);
   };
 
+  const isWorking = agents.some((a) => {
+    const s = (a.status || '').toUpperCase();
+    return !(
+      s === 'COMPLETED' ||
+      s === 'EXECUTED' ||
+      s === 'FIXED' ||
+      s === 'REPAIRED' ||
+      s === 'SUCCESS' ||
+      s === 'FAILED' ||
+      s === 'ERROR' ||
+      s === 'DECLINED' ||
+      s.includes('FAIL')
+    );
+  });
+
   return (
     <div
       data-testid="dynamic-agent-roster-card"
@@ -94,26 +109,57 @@ export default function DynamicAgentRosterCard({
       <div className="flex items-center justify-between border-b border-white/[0.08] pb-2.5">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-lg bg-blue-950/80 border border-blue-800/80 text-blue-300 flex items-center justify-center shrink-0">
-            <Bot className="w-3.5 h-3.5" />
+            {isWorking ? (
+              <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+            ) : (
+              <Bot className="w-3.5 h-3.5" />
+            )}
           </div>
           <span className="font-semibold text-sm text-zinc-100">{title}</span>
         </div>
-        <span
-          data-testid="agent-count-badge"
-          className="px-2 py-0.5 rounded text-[10px] font-mono tabular-nums uppercase bg-blue-950/80 text-blue-300 border border-blue-800/80"
-        >
-          {agents.length} {agents.length === 1 ? 'Worker' : 'Workers'} Spawned
-        </span>
+        <div className="flex items-center gap-2">
+          {isWorking && (
+            <span
+              data-testid="agent-active-badge"
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono text-blue-300 bg-blue-950/80 border border-blue-800/80"
+            >
+              <Loader2 className="w-2.5 h-2.5 text-blue-400 animate-spin" />
+              <span>Working</span>
+            </span>
+          )}
+          <span
+            data-testid="agent-count-badge"
+            className="px-2 py-0.5 rounded text-[10px] font-mono tabular-nums uppercase bg-blue-950/80 text-blue-300 border border-blue-800/80"
+          >
+            {agents.length} {agents.length === 1 ? 'Worker' : 'Workers'} Spawned
+          </span>
+        </div>
       </div>
+
+      {isWorking && (
+        <div data-testid="agent-work-progress-bar" className="w-full bg-blue-950/40 h-1 rounded-full overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600 w-full animate-pulse" />
+        </div>
+      )}
 
       <div className="flex flex-col gap-2.5">
         {agents.map((agent) => {
           const bones = agent.target_bones || agent.target_joints || [];
           const frames = agent.target_frames || [];
-          const isCompleted = agent.status === 'COMPLETED' || agent.status === 'EXECUTED';
-          const isFailed = agent.status === 'FAILED' || agent.status === 'ERROR';
-          const isGenerating = agent.status === 'GENERATING' || agent.status === 'GENERATING_BPY' || agent.status.includes('BPY');
-          const isQa = agent.status === 'QA_VALIDATION' || agent.status === 'QA_PASSED' || agent.status.includes('QA');
+          const statusUpper = (agent.status || '').toUpperCase();
+          const isCompleted =
+            statusUpper === 'COMPLETED' ||
+            statusUpper === 'EXECUTED' ||
+            statusUpper === 'FIXED' ||
+            statusUpper === 'REPAIRED' ||
+            statusUpper === 'SUCCESS';
+          const isFailed =
+            statusUpper === 'FAILED' ||
+            statusUpper === 'ERROR' ||
+            statusUpper === 'DECLINED' ||
+            statusUpper.includes('FAIL');
+          const isGenerating = statusUpper === 'GENERATING' || statusUpper === 'GENERATING_BPY' || statusUpper.includes('BPY');
+          const isQa = statusUpper === 'QA_VALIDATION' || statusUpper === 'QA_PASSED' || statusUpper.includes('QA');
           const memoryRef = getMemoryReference(agent);
           const isCodeExpanded = Boolean(expandedCodeAgents[agent.agent_id]);
           const codeSnippet = agent.code_snippet || `import bpy\narmature = bpy.context.active_object\nrole = "${agent.role}"\nframes = "${frames.join('-')}"`;
@@ -122,7 +168,11 @@ export default function DynamicAgentRosterCard({
             <div
               key={agent.agent_id}
               data-testid={`agent-card-${agent.agent_id}`}
-              className="bg-zinc-950/80 border border-white/[0.06] rounded-xl p-3 flex flex-col gap-2.5 transition-all hover:border-white/[0.12]"
+              className={`bg-zinc-950/80 border rounded-xl p-3 flex flex-col gap-2.5 transition-all ${
+                !isCompleted && !isFailed
+                  ? 'border-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.12)] ring-1 ring-blue-500/20'
+                  : 'border-white/[0.06] hover:border-white/[0.12]'
+              }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
@@ -156,10 +206,15 @@ export default function DynamicAgentRosterCard({
                       data-testid={`status-icon-completed-${agent.agent_id}`}
                       className="w-3 h-3 text-emerald-400"
                     />
+                  ) : isFailed ? (
+                    <XCircle
+                      data-testid={`status-icon-failed-${agent.agent_id}`}
+                      className="w-3 h-3 text-rose-400"
+                    />
                   ) : (
-                    <span
+                    <Loader2
                       data-testid={`status-icon-spinner-${agent.agent_id}`}
-                      className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"
+                      className="w-3 h-3 animate-spin text-current"
                     />
                   )}
                   <span>{agent.status}</span>

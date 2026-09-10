@@ -207,4 +207,49 @@ describe('SessionSidebar component', () => {
     fireEvent.click(expandBtn);
     expect(handleToggle).toHaveBeenCalledTimes(1);
   });
+
+  it('closes mobile drawer when backdrop is clicked', () => {
+    const handleToggle = vi.fn();
+    const { container } = render(
+      <SessionSidebar
+        sessions={mockSessions}
+        activeSessionId="s-1"
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        isOpen={true}
+        onToggleOpen={handleToggle}
+      />
+    );
+
+    const backdrop = container.querySelector('.fixed.inset-0');
+    expect(backdrop).toBeInTheDocument();
+    if (backdrop) {
+      fireEvent.click(backdrop);
+      expect(handleToggle).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('closes drawer on mobile when session is selected', () => {
+    const originalWidth = window.innerWidth;
+    window.innerWidth = 500;
+    const handleSelect = vi.fn();
+    const handleToggle = vi.fn();
+
+    render(
+      <SessionSidebar
+        sessions={mockSessions}
+        activeSessionId="s-1"
+        onSelectSession={handleSelect}
+        onNewSession={vi.fn()}
+        isOpen={true}
+        onToggleOpen={handleToggle}
+      />
+    );
+
+    fireEvent.click(screen.getByText('hero_walk_sample.bvh'));
+    expect(handleSelect).toHaveBeenCalledWith(mockSessions[1]);
+    expect(handleToggle).toHaveBeenCalledTimes(1);
+
+    window.innerWidth = originalWidth;
+  });
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { DragEvent } from 'react';
 import axios from 'axios';
 import SessionSidebar, { formatSessionTitle, type SessionSummary } from './components/SessionSidebar';
@@ -6,11 +6,25 @@ import ChatStream, { type ChatMessage, type ProposedPlanData } from './component
 import MultimodalPromptBar from './components/MultimodalPromptBar';
 import Viewport3D from './components/Viewport3D';
 import type { DiagnosticCardProps, FindingItem } from './components/DiagnosticCard';
+import type { DynamicAgent } from './components/DynamicAgentRosterCard';
 import WhiteBoxCodeDrawer from './components/WhiteBoxCodeDrawer';
 import type { ComparisonMode } from './components/ComparisonControls';
 import MotionPatchLogo from './components/MotionPatchLogo';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
-import { Keyboard } from 'lucide-react';
+import { Keyboard, PanelLeft, Box, Bot, Columns2 } from 'lucide-react';
+import { API_BASE_URL } from './config';
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = (reader.result as string).split(',')[1] || '';
+      resolve(base64String);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 
 function mapFindingToInterval(f: any): FindingItem {
   const frameStart = Number(f.frame_start ?? 0);
@@ -82,7 +96,35 @@ export default function App() {
     joint?: string;
     timestamp?: number;
   } | null>(null);
+  const [mobileViewMode, setMobileViewMode] = useState<'viewport' | 'chat' | 'split'>('viewport');
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [sessionFetchError, setSessionFetchError] = useState<string | null>(null);
+  const sessionSelectReqIdRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!activeSessionId || messages.length === 0) return;
+    const hasForeignSession = messages.some(
+      (m) => m.sessionId && m.sessionId !== activeSessionId
+    );
+    if (hasForeignSession) return;
+
+    try {
+      localStorage.setItem(`mocap_chat_history_${activeSessionId}`, JSON.stringify(messages));
+    } catch {}
+
+    const timer = setTimeout(() => {
+      try {
+        const p = axios.post(`${API_BASE_URL}/sessions/${activeSessionId}/messages`, { messages });
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {});
+        }
+      } catch {}
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [messages, activeSessionId]);
+
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarOpen((prev) => {
       const next = !prev;
@@ -94,33 +136,23 @@ export default function App() {
   }, []);
 
   const fetchSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+    setSessionFetchError(null);
     try {
-      const res = await axios.get('http://localhost:8000/sessions');
+      const res = await axios.get(`${API_BASE_URL}/sessions`);
       setSessions(res.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      const detail = err?.response?.data?.detail || err.message || 'Failed to load threads';
+      setSessionFetchError(detail);
     } finally {
       setIsLoadingSessions(false);
     }
   }, []);
 
   useEffect(() => {
-    let ignore = false;
-    axios
-      .get('http://localhost:8000/sessions')
-      .then((res) => {
-        if (!ignore) setSessions(res.data);
-      })
-      .catch((err) => {
-        console.error(err);
-      })
-      .finally(() => {
-        if (!ignore) setIsLoadingSessions(false);
-      });
-    return () => {
-      ignore = true;
-    };
-  }, []);
+    fetchSessions();
+  }, [fetchSessions]);
 
   const handleNewSession = useCallback(() => {
     setActiveSessionId(null);
@@ -170,6 +202,14 @@ export default function App() {
   }, [handleNewSession, handleToggleSidebar]);
 
   const handleSelectSession = async (session: SessionSummary) => {
+    sessionSelectReqIdRef.current += 1;
+    const currentReqId = sessionSelectReqIdRef.current;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const ac = new AbortController();
+    abortControllerRef.current = ac;
+
     setActiveSessionId(session.session_id);
     const sessionTitle = formatSessionTitle(session);
     setActiveFilename(sessionTitle);
@@ -177,26 +217,36 @@ export default function App() {
     setActiveApprovalId(session.approval_id || null);
 
     try {
-      const filesRes = await axios.get(`http://localhost:8000/sessions/${session.session_id}/files`);
-      if (typeof filesRes.data?.count === 'number') {
-        setSessionUploadCount(filesRes.data.count);
-      } else {
-        setSessionUploadCount(1);
+      const filesRes = await axios.get(`${API_BASE_URL}/sessions/${session.session_id}/files`, {
+        signal: ac.signal,
+      });
+      if (currentReqId === sessionSelectReqIdRef.current) {
+        if (typeof filesRes.data?.count === 'number') {
+          setSessionUploadCount(filesRes.data.count);
+        } else {
+          setSessionUploadCount(1);
+        }
       }
     } catch {
-      setSessionUploadCount(1);
+      if (currentReqId === sessionSelectReqIdRef.current) {
+        setSessionUploadCount(1);
+      }
     }
 
-    const isCompleted = session.lifecycle_state === 'COMPLETED';
-    const repId = session.repaired_asset_id || (isCompleted ? session.asset_id : null);
-    const origId = session.original_asset_id || (isCompleted ? null : session.asset_id);
+    if (currentReqId !== sessionSelectReqIdRef.current) return;
+
+    const origId = session.original_asset_id || session.asset_id;
+    const repId = session.repaired_asset_id && session.repaired_asset_id !== origId ? session.repaired_asset_id : null;
 
     setActiveBvhId(session.asset_id);
     setRepairedBvhId(repId);
     setOriginalBvhId(origId);
 
     try {
-      const res = await axios.get(`http://localhost:8000/analyses/${session.analysis_id}/summary`);
+      const res = await axios.get(`${API_BASE_URL}/analyses/${session.analysis_id}/summary`, {
+        signal: ac.signal,
+      });
+      if (currentReqId !== sessionSelectReqIdRef.current) return;
       const summaryData = res.data;
 
       if (summaryData.asset_id) {
@@ -229,25 +279,62 @@ export default function App() {
       setActiveFps(summaryData.fps || 30);
       setSelectedFinding(null);
 
-      setMessages([
-        {
-          id: `load-${session.session_id}-user`,
-          sender: 'user',
-          timestamp: session.created_at,
-          text: `Opened session: ${sessionTitle}`,
-        },
-        {
-          id: `load-${session.session_id}-assistant`,
-          sender: 'assistant',
-          timestamp: session.created_at,
-          text: `Retrieved kinematic diagnostic record for asset ${sessionTitle}.`,
-          diagnosticData: cardProps,
-          sessionId: session.session_id,
-          isApproved,
-          approvalId: session.approval_id || undefined,
-        },
-      ]);
-    } catch (err) {
+      let loadedMessages: ChatMessage[] = [];
+      try {
+        const cached = localStorage.getItem(`mocap_chat_history_${session.session_id}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            loadedMessages = parsed;
+          }
+        }
+      } catch {}
+
+      try {
+        const msgRes = await axios.get(`${API_BASE_URL}/sessions/${session.session_id}/messages`, {
+          signal: ac.signal,
+        });
+        if (msgRes.data && Array.isArray(msgRes.data.messages) && msgRes.data.messages.length > 0) {
+          loadedMessages = msgRes.data.messages;
+        }
+      } catch {}
+
+      if (currentReqId !== sessionSelectReqIdRef.current) return;
+
+      if (loadedMessages.length === 0) {
+        loadedMessages = [
+          {
+            id: `load-${session.session_id}-user`,
+            sender: 'user',
+            timestamp: session.created_at,
+            text: `Opened session: ${sessionTitle}`,
+            sessionId: session.session_id,
+          },
+          {
+            id: `load-${session.session_id}-assistant`,
+            sender: 'assistant',
+            timestamp: session.created_at,
+            text: `Retrieved kinematic diagnostic record for asset ${sessionTitle}.`,
+            diagnosticData: cardProps,
+            sessionId: session.session_id,
+            isApproved,
+            approvalId: session.approval_id || undefined,
+          },
+        ];
+        try {
+          const p = axios.post(`${API_BASE_URL}/sessions/${session.session_id}/messages`, { messages: loadedMessages });
+          if (p && typeof p.catch === 'function') {
+            p.catch(() => {});
+          }
+        } catch {}
+      }
+
+      setMessages(loadedMessages);
+      try {
+        localStorage.setItem(`mocap_chat_history_${session.session_id}`, JSON.stringify(loadedMessages));
+      } catch {}
+    } catch (err: any) {
+      if (axios.isCancel(err) || currentReqId !== sessionSelectReqIdRef.current) return;
       console.error(err);
       setMessages([
         {
@@ -286,6 +373,7 @@ export default function App() {
       text: userPrompt
         ? `${userPrompt}\n(Attached file: ${file.name})`
         : `Uploaded ${file.name} (${(file.size / 1024).toFixed(1)} KB)`,
+      sessionId: activeSessionId || undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -301,7 +389,7 @@ export default function App() {
     }
 
     try {
-      const res = await axios.post('http://localhost:8000/upload', formData, {
+      const res = await axios.post(`${API_BASE_URL}/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -349,7 +437,10 @@ export default function App() {
         sessionId: data.session_id,
       };
 
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [
+        ...prev.map((m) => (m.id === userMsgId && !m.sessionId ? { ...m, sessionId: data.session_id } : m)),
+        assistantMsg,
+      ]);
       fetchSessions();
     } catch (err: any) {
       console.error(err);
@@ -367,6 +458,15 @@ export default function App() {
   };
 
   const handleSendMessage = async (prompt: string, audio?: Blob | null) => {
+    let audioBase64: string | undefined;
+    if (audio) {
+      try {
+        audioBase64 = await blobToBase64(audio);
+      } catch (e) {
+        console.error('Failed to convert voice memo blob', e);
+      }
+    }
+
     const userText = prompt
       ? (audio ? `${prompt} [Voice memo attached]` : prompt)
       : (audio ? '[Voice memo instructions recorded]' : '');
@@ -376,6 +476,7 @@ export default function App() {
       sender: 'user',
       timestamp: new Date().toISOString(),
       text: userText,
+      sessionId: activeSessionId || undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -393,9 +494,11 @@ export default function App() {
 
     setIsGenerating(true);
     try {
-      const res = await axios.post(`http://localhost:8000/sessions/${activeSessionId}/chat`, {
+      const res = await axios.post(`${API_BASE_URL}/sessions/${activeSessionId}/chat`, {
         message: prompt || (audio ? 'Analyze voice memo repair instructions' : ''),
         asset_id: activeBvhId || undefined,
+        audio_base64: audioBase64,
+        audio_mime: audio?.type || (audioBase64 ? 'audio/webm' : undefined),
       });
       const data = res.data;
 
@@ -431,6 +534,7 @@ export default function App() {
       joint,
       timestamp: Date.now(),
     });
+    setMobileViewMode('viewport');
   };
 
   const handleApproveRepair = async (
@@ -481,7 +585,7 @@ export default function App() {
     };
     setMessages((prev) => [...prev, initialRosterMsg]);
 
-    const streamUrl = `http://localhost:8000/sessions/${targetSessionId}/agent-stream`;
+    const streamUrl = `${API_BASE_URL}/sessions/${targetSessionId}/agent-stream`;
     const eventSource = new EventSource(streamUrl);
 
     eventSource.onmessage = (event) => {
@@ -527,7 +631,7 @@ export default function App() {
         } else if (data.event === 'REPAIR_COMPLETED') {
           setMessages((prev) =>
             prev.map((msg) => {
-              if (msg.agentRoster && msg.agentRoster.length > 0) {
+              if (msg.id === rosterMsgId && msg.agentRoster && msg.agentRoster.length > 0) {
                 return {
                   ...msg,
                   agentRoster: msg.agentRoster.map((a) => ({
@@ -556,15 +660,22 @@ export default function App() {
       formData.append('approval_id', approvalId);
       if (activeBvhId) formData.append('bvh_id', activeBvhId);
       if (customPrompt) formData.append('prompt', customPrompt);
+      if (selectedJoints && selectedJoints.length > 0) {
+        formData.append('selected_joints', JSON.stringify(selectedJoints));
+      }
 
-      const genRes = await axios.post('http://localhost:8000/generate_code', formData);
-      if (genRes.data && Array.isArray(genRes.data.roster)) {
+      const genRes = await axios.post(`${API_BASE_URL}/generate_code`, formData);
+      const initialRoster: DynamicAgent[] = Array.isArray(genRes.data?.roster)
+        ? genRes.data.roster.map((a: DynamicAgent) => ({ ...a, status: 'SPAWNED' }))
+        : [];
+
+      if (initialRoster.length > 0) {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === rosterMsgId
               ? {
                   ...msg,
-                  agentRoster: genRes.data.roster,
+                  agentRoster: initialRoster,
                   text: 'Dynamic multi-agent roster synthesized and active:',
                 }
               : msg
@@ -572,10 +683,30 @@ export default function App() {
         );
       }
 
-      const runRes = await axios.post('http://localhost:8000/runs', {
+      await new Promise((r) => setTimeout(r, 600));
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === rosterMsgId
+            ? {
+                ...msg,
+                agentRoster: (msg.agentRoster || []).map((a) => ({
+                  ...a,
+                  status: 'THINKING',
+                })),
+              }
+            : msg
+        )
+      );
+
+      await new Promise((r) => setTimeout(r, 700));
+
+      const runRes = await axios.post(`${API_BASE_URL}/runs`, {
         session_id: targetSessionId,
         plan_id: planId,
         approval_id: approvalId,
+        prompt: customPrompt,
+        selected_joints: selectedJoints,
       });
       const runData = runRes.data;
       if (runData.asset_id) {
@@ -588,33 +719,51 @@ export default function App() {
       if (runData.script_code) {
         setCurrentScriptCode(runData.script_code);
       }
+      const outcomeStatus = runData.outcome_status || (runData.status === 'COMPLETED' ? 'COMPLETED' : 'PARTIALLY_REPAIRED');
+      const summaryMsg = runData.summary_message || runData.metrics?.summary_message || (outcomeStatus === 'COMPLETED' ? 'Motion repair completed successfully.' : 'Partial motion repair completed.');
       const repairCardMsg: ChatMessage = {
         id: `repair-complete-${Date.now()}`,
         sender: 'assistant',
         timestamp: new Date().toISOString(),
-        text: 'Multi-agent kinematic repair executed successfully. Blender modification applied:',
+        text: summaryMsg,
         repairData: {
           assetId: runData.asset_id,
           filename: activeFilename ? `repaired_${activeFilename.replace(/^repaired_/, '')}` : undefined,
-          repairedFileUrl: runData.repaired_bvh_url || runData.repaired_file_url || `http://localhost:8000/bvh/${runData.asset_id}`,
+          repairedFileUrl: runData.repaired_bvh_url || runData.repaired_file_url || `${API_BASE_URL}/bvh/${runData.asset_id}`,
           scriptCode: runData.script_code || '',
           metrics: {
             execution_time_seconds: runData.metrics?.execution_duration_seconds ?? runData.metrics?.execution_time_seconds ?? 0,
-            agents_executed: runData.metrics?.agents_executed ?? (genRes.data?.roster?.length || 2),
+            agents_executed: runData.metrics?.agents_executed ?? (initialRoster.length || 2),
             qa_passed: runData.qa_status === 'passed' || runData.metrics?.qa_passed === true,
+            outcome_status: outcomeStatus,
+            summary_message: summaryMsg,
+            fixed_findings: runData.fixed_findings || runData.metrics?.fixed_findings || [],
+            unresolved_findings: runData.unresolved_findings || runData.metrics?.unresolved_findings || [],
           },
         },
         sessionId: targetSessionId,
       };
+
+      await new Promise((r) => setTimeout(r, 400));
+
       setMessages((prev) => [
         ...prev.map((msg) => {
-          if (msg.agentRoster && msg.agentRoster.length > 0) {
+          if (msg.id === rosterMsgId && msg.agentRoster) {
             return {
               ...msg,
-              agentRoster: msg.agentRoster.map((a) => ({
-                ...a,
-                status: 'COMPLETED',
-              })),
+              agentRoster:
+                msg.agentRoster.length > 0
+                  ? msg.agentRoster.map((a) => ({
+                      ...a,
+                      status: 'COMPLETED',
+                    }))
+                  : [
+                      {
+                        agent_id: 'repaired-1',
+                        role: 'Kinematic Solver',
+                        status: 'COMPLETED',
+                      },
+                    ],
             };
           }
           return msg;
@@ -631,17 +780,26 @@ export default function App() {
         id: `error-${Date.now()}`,
         sender: 'assistant',
         timestamp: new Date().toISOString(),
-        text: `Repair execution error: ${errDetail}`,
+        text: `Repair could not be completed: ${errDetail}`,
       };
       setMessages((prev) => [
         ...prev.map((msg) => {
-          if (msg.agentRoster && msg.agentRoster.length > 0) {
+          if (msg.agentRoster) {
             return {
               ...msg,
-              agentRoster: msg.agentRoster.map((a) => ({
-                ...a,
-                status: a.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED',
-              })),
+              agentRoster:
+                msg.agentRoster.length > 0
+                  ? msg.agentRoster.map((a) => ({
+                      ...a,
+                      status: a.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED',
+                    }))
+                  : [
+                      {
+                        agent_id: 'err-1',
+                        role: 'Kinematic Solver',
+                        status: 'FAILED',
+                      },
+                    ],
             };
           }
           return msg;
@@ -659,10 +817,10 @@ export default function App() {
     if (!targetSessionId) return;
 
     try {
-      const sessRes = await axios.get(`http://localhost:8000/workflow-sessions/${targetSessionId}`);
+      const sessRes = await axios.get(`${API_BASE_URL}/workflow-sessions/${targetSessionId}`);
       const analysisId = sessRes.data.analysis_id;
 
-      const analysisRes = await axios.get(`http://localhost:8000/analyses/${analysisId}`);
+      const analysisRes = await axios.get(`${API_BASE_URL}/analyses/${analysisId}`);
       const allFindings = analysisRes.data.findings || [];
       let selectedFids: string[] = [];
       if (plan.selected_joints && plan.selected_joints.length > 0) {
@@ -675,7 +833,7 @@ export default function App() {
         selectedFids = allFindings.map((f: any) => f.finding_id);
       }
 
-      const planRes = await axios.post(`http://localhost:8000/analyses/${analysisId}/repair-plan`, {
+      const planRes = await axios.post(`${API_BASE_URL}/analyses/${analysisId}/repair-plan`, {
         session_id: targetSessionId,
         selected_finding_ids: selectedFids,
         selected_joints: plan.selected_joints,
@@ -685,7 +843,7 @@ export default function App() {
       const planId = planRes.data.plan_id;
       const planVersion = planRes.data.version;
 
-      const approveRes = await axios.post(`http://localhost:8000/repair-plans/${planId}/approve`, {
+      const approveRes = await axios.post(`${API_BASE_URL}/repair-plans/${planId}/approve`, {
         session_id: targetSessionId,
         plan_id: planId,
         repair_plan_version: planVersion,
@@ -719,7 +877,7 @@ export default function App() {
     if (!activeSessionId) return;
     setIsExecutingScript(true);
     try {
-      const res = await axios.post('http://localhost:8000/run_blender', {
+      const res = await axios.post(`${API_BASE_URL}/run_blender`, {
         session_id: activeSessionId,
         plan_id: activePlanId || undefined,
         approval_id: activeApprovalId || undefined,
@@ -743,7 +901,7 @@ export default function App() {
         repairData: {
           assetId: data.asset_id,
           filename: activeFilename ? `repaired_${activeFilename.replace(/^repaired_/, '')}` : undefined,
-          repairedFileUrl: data.repaired_file_url || data.repaired_bvh_url || `http://localhost:8000/bvh/${data.asset_id}`,
+          repairedFileUrl: data.repaired_file_url || data.repaired_bvh_url || `${API_BASE_URL}/bvh/${data.asset_id}`,
           scriptCode: editedCode,
           metrics: {
             execution_time_seconds: data.metrics?.execution_duration_seconds ?? data.metrics?.execution_time_seconds ?? 0,
@@ -753,9 +911,10 @@ export default function App() {
         },
         sessionId: activeSessionId,
       };
+      const lastRosterId = [...messages].reverse().find((m) => m.agentRoster && m.agentRoster.length > 0)?.id;
       setMessages((prev) => [
         ...prev.map((msg) => {
-          if (msg.agentRoster && msg.agentRoster.length > 0) {
+          if (lastRosterId && msg.id === lastRosterId && msg.agentRoster && msg.agentRoster.length > 0) {
             return {
               ...msg,
               agentRoster: msg.agentRoster.map((a) => ({
@@ -842,19 +1001,72 @@ export default function App() {
       onDrop={handleWindowDrop}
       className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-100 overflow-hidden font-sans antialiased"
     >
-      <header className="h-11 border-b border-white/[0.08] bg-[#090c13] backdrop-blur-2xl flex items-center justify-between px-4 shrink-0 select-none z-30">
-        <div className="flex items-center gap-2.5">
+      <header className="h-11 border-b border-white/[0.08] bg-[#090c13] backdrop-blur-2xl flex items-center justify-between px-3 sm:px-4 shrink-0 select-none z-30">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="mobile-sidebar-toggle"
+            onClick={handleToggleSidebar}
+            className="md:hidden p-1.5 text-zinc-400 hover:text-white hover:bg-white/[0.06] rounded-lg transition-colors cursor-pointer"
+            title="Toggle threads drawer"
+          >
+            <PanelLeft className="w-4 h-4" />
+          </button>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5">
             <div className="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-[0_0_12px_rgba(37,99,235,0.4)]">
               <MotionPatchLogo size="sm" className="text-white" />
             </div>
-            <span className="font-semibold text-sm tracking-tight text-white font-display">MotionPatch</span>
+            <span className="font-semibold text-sm tracking-tight text-white font-display hidden xs:inline sm:inline">MotionPatch</span>
           </div>
         </div>
 
+        {hasActiveWorkspace && (
+          <div className="flex md:hidden items-center p-0.5 bg-zinc-900/90 border border-white/[0.08] rounded-lg text-[11px] font-medium">
+            <button
+              type="button"
+              data-testid="mobile-tab-viewport"
+              onClick={() => setMobileViewMode('viewport')}
+              className={`px-2 py-0.5 rounded-md transition-colors flex items-center gap-1 cursor-pointer ${
+                mobileViewMode === 'viewport'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Box className="w-3 h-3" />
+              <span>3D</span>
+            </button>
+            <button
+              type="button"
+              data-testid="mobile-tab-chat"
+              onClick={() => setMobileViewMode('chat')}
+              className={`px-2 py-0.5 rounded-md transition-colors flex items-center gap-1 cursor-pointer ${
+                mobileViewMode === 'chat'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Bot className="w-3 h-3" />
+              <span>Inspector</span>
+            </button>
+            <button
+              type="button"
+              data-testid="mobile-tab-split"
+              onClick={() => setMobileViewMode('split')}
+              className={`px-2 py-0.5 rounded-md transition-colors flex items-center gap-1 cursor-pointer ${
+                mobileViewMode === 'split'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Columns2 className="w-3 h-3" />
+              <span>Split</span>
+            </button>
+          </div>
+        )}
+
         {activeFilename && hasActiveWorkspace ? (
-          <div className="flex items-center gap-2 bg-[#0c1017] border border-white/[0.07] px-3 py-1 rounded-full text-xs">
+          <div className="hidden md:flex items-center gap-2 bg-[#0c1017] border border-white/[0.07] px-3 py-1 rounded-full text-xs">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             <span className="text-zinc-200 font-mono text-[11px] truncate font-medium max-w-xs">
               {activeFilename}
@@ -867,17 +1079,17 @@ export default function App() {
             type="button"
             data-testid="keyboard-shortcuts-btn"
             onClick={() => setIsShortcutsOpen(true)}
-            className="px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] border border-transparent hover:border-white/[0.08] transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="px-2 sm:px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] border border-transparent hover:border-white/[0.08] transition-colors flex items-center gap-1.5 cursor-pointer"
             title="Keyboard Shortcuts (?)"
           >
             <Keyboard className="w-3.5 h-3.5 text-blue-400" />
             <span className="text-[11px] hidden sm:inline">Shortcuts</span>
-            <kbd className="px-1 py-0.2 rounded bg-zinc-800 border border-white/[0.1] text-[9px] font-mono text-zinc-400">?</kbd>
+            <kbd className="px-1 py-0.2 rounded bg-zinc-800 border border-white/[0.1] text-[9px] font-mono text-zinc-400 hidden sm:inline">?</kbd>
           </button>
         </div>
       </header>
 
-      <div className="flex-1 flex flex-row overflow-hidden relative">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {isDragOverWindow && (
           <div className="absolute inset-0 z-50 bg-blue-950/80 border-2 border-dashed border-blue-400/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 pointer-events-none">
             <p className="text-base font-semibold text-blue-200">Drop BVH file to stage for analysis</p>
@@ -893,6 +1105,8 @@ export default function App() {
           isOpen={isSidebarOpen}
           onToggleOpen={handleToggleSidebar}
           isLoading={isLoadingSessions}
+          sessionError={sessionFetchError}
+          onRetry={fetchSessions}
         />
 
         {!hasActiveWorkspace ? (
@@ -927,7 +1141,16 @@ export default function App() {
           </main>
         ) : (
           <>
-            <main className="w-[60%] h-full flex flex-col overflow-hidden bg-zinc-950 relative border-r border-white/[0.08]">
+            <main
+              data-testid="main-viewport-container"
+              className={`w-full md:w-[60%] md:h-full overflow-hidden bg-zinc-950 relative md:border-r border-white/[0.08] ${
+                mobileViewMode === 'viewport'
+                  ? 'flex-1 h-full flex flex-col'
+                  : mobileViewMode === 'split'
+                  ? 'h-[42vh] shrink-0 flex flex-col border-b'
+                  : 'hidden md:flex md:flex-col'
+              }`}
+            >
               <Viewport3D
                 bvhId={activeBvhId}
                 originalBvhId={originalBvhId}
@@ -943,7 +1166,16 @@ export default function App() {
               />
             </main>
 
-            <section className="w-[40%] shrink-0 flex flex-col h-full bg-[#0a0d14] overflow-hidden shadow-2xl z-10">
+            <section
+              data-testid="main-inspector-container"
+              className={`w-full md:w-[40%] md:h-full shrink-0 flex-col bg-[#0a0d14] overflow-hidden shadow-2xl z-10 ${
+                mobileViewMode === 'chat'
+                  ? 'flex-1 h-full flex'
+                  : mobileViewMode === 'split'
+                  ? 'flex-1 min-h-[280px] flex'
+                  : 'hidden md:flex'
+              }`}
+            >
               <ChatStream
                 messages={messages}
                 activeSessionId={activeSessionId}

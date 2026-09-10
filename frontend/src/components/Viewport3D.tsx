@@ -7,6 +7,7 @@ import { Play, Pause, RotateCcw, Eye } from 'lucide-react';
 import TimelineScrubber from './TimelineScrubber';
 import ComparisonControls, { type ComparisonMode, syncMixerTime } from './ComparisonControls';
 import type { FindingItem } from './DiagnosticCard';
+import { API_BASE_URL } from '../config';
 
 export type { ComparisonMode };
 
@@ -348,8 +349,6 @@ export default function Viewport3D({
   bvhId,
   originalBvhId,
   repairedBvhId,
-  filename,
-  repairedFilename,
   brokenIntervals = [],
   totalFrames,
   fps = 30,
@@ -361,7 +360,8 @@ export default function Viewport3D({
   showIdleOverlay = false,
 }: Viewport3DProps) {
   const effectiveOriginalBvhId = originalBvhId || bvhId || null;
-  const effectiveRepairedBvhId = repairedBvhId || null;
+  const effectiveRepairedBvhId =
+    repairedBvhId && repairedBvhId !== effectiveOriginalBvhId ? repairedBvhId : null;
 
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>(() => {
     if (mode) return mode;
@@ -399,12 +399,12 @@ export default function Viewport3D({
 
   const originalUrl = useMemo(() => {
     if (!effectiveOriginalBvhId) return null;
-    return `http://localhost:8000/bvh/${effectiveOriginalBvhId}`;
+    return `${API_BASE_URL}/bvh/${effectiveOriginalBvhId}`;
   }, [effectiveOriginalBvhId]);
 
   const repairedUrl = useMemo(() => {
     if (!effectiveRepairedBvhId) return null;
-    return `http://localhost:8000/bvh/${effectiveRepairedBvhId}`;
+    return `${API_BASE_URL}/bvh/${effectiveRepairedBvhId}`;
   }, [effectiveRepairedBvhId]);
 
   const handleResetCamera = useCallback(() => {
@@ -517,26 +517,9 @@ export default function Viewport3D({
     }
   }, [selectedFinding]);
 
-  const activeDisplayFilename = useMemo(() => {
-    if (comparisonMode === 'repaired') {
-      return repairedFilename || (filename ? `repaired_${filename.replace(/^repaired_/, '')}` : 'repaired_motion.bvh');
-    }
-    if (comparisonMode === 'ghost') {
-      return filename ? `${filename} vs repaired` : 'Comparison View';
-    }
-    return filename || null;
-  }, [comparisonMode, filename, repairedFilename]);
-
   return (
-    <div className="flex-1 min-w-[450px] relative h-full bg-zinc-950 flex flex-col overflow-hidden select-none">
+    <div className="flex-1 min-w-0 md:min-w-[320px] relative h-full bg-zinc-950 flex flex-col overflow-hidden select-none">
       <div className="relative flex-1 w-full h-full min-h-0">
-
-        {activeDisplayFilename && (
-          <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-zinc-900/80 backdrop-blur-xl px-3 py-1.5 rounded-xl border border-white/[0.08] text-xs font-mono text-zinc-300 shadow-xl pointer-events-none">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
-            <span className="truncate max-w-[200px]">{activeDisplayFilename}</span>
-          </div>
-        )}
 
         {effectiveRepairedBvhId && (
           <ComparisonControls

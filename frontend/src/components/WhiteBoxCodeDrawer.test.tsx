@@ -26,7 +26,7 @@ describe('WhiteBoxCodeDrawer', () => {
     expect(screen.queryByTestId('white-box-code-drawer')).not.toBeInTheDocument();
   });
 
-  it('renders drawer with initial script when isOpen is true', () => {
+  it('renders drawer with initial script when isOpen is true', async () => {
     render(
       <WhiteBoxCodeDrawer
         isOpen={true}
@@ -35,11 +35,11 @@ describe('WhiteBoxCodeDrawer', () => {
       />
     );
     expect(screen.getByTestId('white-box-code-drawer')).toBeInTheDocument();
-    const editor = screen.getByTestId('mock-monaco-editor') as HTMLTextAreaElement;
+    const editor = (await screen.findByTestId('mock-monaco-editor')) as HTMLTextAreaElement;
     expect(editor.value).toBe("import bpy; print('repair')");
   });
 
-  it('resets code to initial script on reset button click', () => {
+  it('resets code to initial script on reset button click', async () => {
     render(
       <WhiteBoxCodeDrawer
         isOpen={true}
@@ -47,7 +47,7 @@ describe('WhiteBoxCodeDrawer', () => {
         initialScript="import bpy; orig = True"
       />
     );
-    const editor = screen.getByTestId('mock-monaco-editor') as HTMLTextAreaElement;
+    const editor = (await screen.findByTestId('mock-monaco-editor')) as HTMLTextAreaElement;
     fireEvent.change(editor, { target: { value: 'import bpy; modified = True' } });
     expect(editor.value).toBe('import bpy; modified = True');
 
@@ -55,7 +55,7 @@ describe('WhiteBoxCodeDrawer', () => {
     expect(editor.value).toBe('import bpy; orig = True');
   });
 
-  it('triggers onExecuteScript with edited code when run button is clicked', () => {
+  it('triggers onExecuteScript with edited code when run button is clicked', async () => {
     const handleExecute = vi.fn();
     render(
       <WhiteBoxCodeDrawer
@@ -65,7 +65,7 @@ describe('WhiteBoxCodeDrawer', () => {
         onExecuteScript={handleExecute}
       />
     );
-    const editor = screen.getByTestId('mock-monaco-editor') as HTMLTextAreaElement;
+    const editor = (await screen.findByTestId('mock-monaco-editor')) as HTMLTextAreaElement;
     fireEvent.change(editor, { target: { value: 'import bpy; custom_filter()' } });
     fireEvent.click(screen.getByTestId('run-script-btn'));
 

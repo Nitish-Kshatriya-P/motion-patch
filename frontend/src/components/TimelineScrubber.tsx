@@ -63,7 +63,7 @@ export default function TimelineScrubber({
   return (
     <div
       data-testid="timeline-scrubber"
-      className="w-full bg-zinc-950/80 backdrop-blur-xl border-t border-white/[0.08] px-4 py-2.5 flex flex-col gap-2 select-none z-20 font-sans"
+      className="w-full bg-zinc-950/80 backdrop-blur-xl border-t border-white/[0.08] px-2 sm:px-4 py-2 sm:py-2.5 flex flex-col gap-2 select-none z-20 font-sans"
     >
       <div className="relative w-full h-7 flex items-center">
         <div
@@ -102,7 +102,7 @@ export default function TimelineScrubber({
           data-testid="scrubber-slider"
           type="range"
           min={0}
-          max={safeTotalFrames - 1}
+          max={safeTotalFrames > 1 ? safeTotalFrames - 1 : 1}
           value={clampedFrame}
           onInput={(e) => onSeek(Number((e.target as HTMLInputElement).value))}
           onChange={(e) => onSeek(Number(e.target.value))}
@@ -116,8 +116,8 @@ export default function TimelineScrubber({
         />
       </div>
 
-      <div className="flex items-center justify-between text-xs text-zinc-300">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 text-xs text-zinc-300">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
           <button
             data-testid="play-pause-btn"
             onClick={onTogglePlay}
@@ -160,14 +160,14 @@ export default function TimelineScrubber({
 
           <div
             data-testid="frame-counter"
-            className="ml-2 font-mono tabular-nums text-[11px] text-zinc-300 bg-zinc-900/80 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/[0.08] flex items-center gap-1.5 shadow-xs"
+            className="ml-1 sm:ml-2 font-mono tabular-nums text-[10px] sm:text-[11px] text-zinc-300 bg-zinc-900/80 backdrop-blur-md px-2 sm:px-2.5 py-1 rounded-lg border border-white/[0.08] flex items-center gap-1 sm:gap-1.5 shadow-xs"
           >
             <span className="text-zinc-500 font-sans">Frame</span>
             <span className="font-semibold text-blue-400">{clampedFrame}</span>
             <span className="text-zinc-600">/</span>
             <span className="text-zinc-400">{safeTotalFrames - 1}</span>
-            <span className="text-zinc-700">|</span>
-            <span className="text-zinc-400 font-mono text-[10px]">
+            <span className="hidden sm:inline text-zinc-700">|</span>
+            <span className="hidden sm:inline text-zinc-400 font-mono text-[10px]">
               {currentTimeSec}s / {totalTimeSec}s
             </span>
           </div>
@@ -179,7 +179,7 @@ export default function TimelineScrubber({
               key={speed}
               data-testid={`speed-${speed}x`}
               onClick={() => onChangePlaybackRate(speed)}
-              className={`px-2 py-0.5 rounded text-[11px] font-mono tabular-nums transition-colors cursor-pointer ${
+              className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-mono tabular-nums transition-colors cursor-pointer ${
                 playbackRate === speed
                   ? 'bg-blue-600 text-white font-semibold shadow-xs'
                   : 'text-zinc-400 hover:text-zinc-200'

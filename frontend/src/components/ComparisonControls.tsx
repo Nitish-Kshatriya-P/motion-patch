@@ -77,14 +77,14 @@ export default function ComparisonControls({
       data-testid="comparison-controls"
       data-original-id={originalBvhId || undefined}
       data-current-frame={currentFrame}
-      className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5"
+      className="absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 max-w-[calc(100vw-2rem)]"
     >
-      <div className="flex items-center bg-zinc-950/80 backdrop-blur-2xl p-1 rounded-2xl border border-white/[0.08] shadow-2xl gap-1 select-none">
+      <div className="flex flex-wrap items-center justify-center bg-zinc-950/80 backdrop-blur-2xl p-1 rounded-2xl border border-white/[0.08] shadow-2xl gap-1 select-none max-w-full">
         <button
           data-testid="mode-original-btn"
           type="button"
           onClick={() => onModeChange('original')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+          className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-medium rounded-xl transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer ${
             mode === 'original'
               ? 'bg-blue-600 text-white shadow-[0_0_12px_rgba(37,99,235,0.4)]'
               : 'text-zinc-300 hover:text-white hover:bg-white/[0.08]'
@@ -99,7 +99,7 @@ export default function ComparisonControls({
           data-testid="mode-repaired-btn"
           type="button"
           onClick={() => onModeChange('repaired')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+          className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-medium rounded-xl transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer ${
             mode === 'repaired'
               ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
               : 'text-zinc-300 hover:text-white hover:bg-white/[0.08]'
@@ -114,7 +114,7 @@ export default function ComparisonControls({
           data-testid="mode-ghost-btn"
           type="button"
           onClick={() => onModeChange('ghost')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+          className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-medium rounded-xl transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer ${
             mode === 'ghost'
               ? 'bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)] ring-1 ring-purple-400/40'
               : 'text-zinc-300 hover:text-white hover:bg-white/[0.08]'
@@ -129,7 +129,7 @@ export default function ComparisonControls({
       {mode === 'ghost' && (
         <div
           data-testid="ghost-legend"
-          className="flex items-center gap-3 px-3 py-1 bg-zinc-950/80 backdrop-blur-xl rounded-full border border-white/[0.08] text-[10px] font-mono shadow-lg text-zinc-300 animate-in fade-in duration-200"
+          className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 px-3 py-1 bg-zinc-950/80 backdrop-blur-xl rounded-2xl sm:rounded-full border border-white/[0.08] text-[10px] font-mono shadow-lg text-zinc-300 animate-in fade-in duration-200 max-w-full"
         >
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-amber-400/90 shadow-[0_0_6px_rgba(251,191,36,0.6)]" />

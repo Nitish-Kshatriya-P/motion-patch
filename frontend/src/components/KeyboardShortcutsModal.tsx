@@ -70,6 +70,7 @@ export default function KeyboardShortcutsModal({ isOpen, onClose }: KeyboardShor
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
       }
     };

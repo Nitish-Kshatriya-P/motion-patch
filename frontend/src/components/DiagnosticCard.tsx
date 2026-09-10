@@ -336,7 +336,7 @@ export default function DiagnosticCard({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1.5 ml-auto">
+                      <div className="flex flex-wrap items-center gap-1.5 ml-auto">
                         {item.evidence?.ai_verified && (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-blue-950/80 text-blue-300 border border-blue-800/80">
                             <Sparkles className="w-2.5 h-2.5 text-blue-400" />
@@ -387,7 +387,7 @@ export default function DiagnosticCard({
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/[0.04]">
-                      <div className="flex items-center gap-1.5 font-mono">
+                      <div className="flex flex-wrap items-center gap-1.5 font-mono">
                         <button
                           type="button"
                           onClick={() => onSelectFinding?.(item.finding_id, item.frame_start, item.joint)}
@@ -418,7 +418,7 @@ export default function DiagnosticCard({
 
                     {isExpanded && (
                       <div className="flex flex-col gap-2 pt-2 border-t border-white/[0.04] text-xs">
-                        <div className="grid grid-cols-2 gap-2 bg-zinc-900/90 p-2 rounded-lg border border-white/[0.08] font-mono text-[11px] tabular-nums">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-zinc-900/90 p-2 rounded-lg border border-white/[0.08] font-mono text-[11px] tabular-nums">
                           <div>
                             <span className="text-zinc-400 font-medium">Max Joint Velocity: </span>
                             <span className="text-amber-300 font-semibold">{peakVelocity}</span>

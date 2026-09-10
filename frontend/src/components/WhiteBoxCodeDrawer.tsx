@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Terminal, Play, Copy, Check, RotateCcw, X, Loader2 } from 'lucide-react';
+
+const Editor = lazy(() => import('@monaco-editor/react'));
 
 export interface WhiteBoxCodeDrawerProps {
   isOpen: boolean;
@@ -131,24 +132,33 @@ export default function WhiteBoxCodeDrawer({
       </div>
 
       <div className="flex-1 w-full bg-zinc-950 overflow-hidden relative">
-        <Editor
-          height="100%"
-          defaultLanguage="python"
-          language="python"
-          theme="vs-dark"
-          value={code}
-          onChange={(val) => setCode(val || '')}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 12,
-            lineNumbers: 'on',
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            tabSize: 4,
-            insertSpaces: true,
-            fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
-          }}
-        />
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full text-xs text-zinc-500 font-mono gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+              <span>Loading Monaco Editor...</span>
+            </div>
+          }
+        >
+          <Editor
+            height="100%"
+            defaultLanguage="python"
+            language="python"
+            theme="vs-dark"
+            value={code}
+            onChange={(val) => setCode(val || '')}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 12,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 4,
+              insertSpaces: true,
+              fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
+            }}
+          />
+        </Suspense>
       </div>
 
       <div className="h-9 border-t border-white/[0.08] px-4 bg-zinc-950 flex items-center justify-between text-[11px] text-zinc-500 font-mono shrink-0">

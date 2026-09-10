@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Bot, Sparkles, Sliders, XCircle, CheckCircle2, AlertCircle, Loader2, Lock, Target, Copy, Check } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 export interface ConsentPromptCardProps {
   analysisId: string;
@@ -10,6 +11,7 @@ export interface ConsentPromptCardProps {
   initialApproved?: boolean;
   initialApprovalId?: string;
   initialDeclined?: boolean;
+  isActive?: boolean;
   onApproved?: (planId: string, approvalId: string, customPrompt?: string, selectedJoints?: string[]) => void;
   onDeclined?: () => void;
   apiBaseUrl?: string;
@@ -23,9 +25,10 @@ export default function ConsentPromptCard({
   initialApproved = false,
   initialApprovalId,
   initialDeclined = false,
+  isActive = true,
   onApproved,
   onDeclined,
-  apiBaseUrl = 'http://localhost:8000',
+  apiBaseUrl = API_BASE_URL,
 }: ConsentPromptCardProps) {
   const [isApproved, setIsApproved] = useState<boolean>(initialApproved);
   const [approvalId, setApprovalId] = useState<string | null>(initialApprovalId || null);
@@ -50,7 +53,17 @@ export default function ConsentPromptCard({
     setError(null);
     try {
       let fids: string[] = findingIds || [];
-      if (fids.length === 0) {
+      if (overrideJoints && overrideJoints.length > 0) {
+        const analysisRes = await axios.get(`${apiBaseUrl}/analyses/${analysisId}`);
+        const allFindings = analysisRes.data.findings || [];
+        const selectedSet = new Set(overrideJoints.map((j) => j.toLowerCase()));
+        fids = allFindings
+          .filter((f: any) => {
+            const aj = (f.affected_joint || '').toLowerCase();
+            return selectedSet.has(aj) || Array.from(selectedSet).some((s) => aj.includes(s) || s.includes(aj));
+          })
+          .map((f: any) => f.finding_id);
+      } else if (fids.length === 0) {
         const analysisRes = await axios.get(`${apiBaseUrl}/analyses/${analysisId}`);
         fids = (analysisRes.data.findings || []).map((f: { finding_id: string }) => f.finding_id);
       }
@@ -75,6 +88,7 @@ export default function ConsentPromptCard({
 
       const planId = planRes.data.plan_id;
       const planVersion = planRes.data.version;
+      const finalFindingIds = planRes.data.selected_finding_ids || fids;
 
       const approveData: {
         session_id: string;
@@ -88,7 +102,7 @@ export default function ConsentPromptCard({
         session_id: sessionId,
         plan_id: planId,
         repair_plan_version: planVersion,
-        selected_finding_ids: fids,
+        selected_finding_ids: finalFindingIds,
         confirmed: true,
       };
       if (customPrompt.trim()) {
@@ -104,7 +118,8 @@ export default function ConsentPromptCard({
       setApprovalId(receivedApprovalId);
       setIsApproved(true);
       setShowCustomPrompt(false);
-      if (overrideJoints) {
+      setShowJointSelector(false);
+      if (overrideJoints && overrideJoints.length > 0) {
         onApproved?.(planId, receivedApprovalId, customPrompt.trim() || undefined, overrideJoints);
       } else {
         onApproved?.(planId, receivedApprovalId, customPrompt.trim() || undefined);
@@ -124,7 +139,9 @@ export default function ConsentPromptCard({
       if (sessionId) {
         try {
           await axios.post(`${apiBaseUrl}/sessions/${sessionId}/cancel`);
-        } catch {
+        } catch (cancelErr: any) {
+          const detail = cancelErr?.response?.data?.detail || cancelErr.message || 'Failed to cancel session';
+          setError(`Cancellation warning: ${detail}`);
         }
       }
       setIsDeclined(true);
@@ -140,7 +157,7 @@ export default function ConsentPromptCard({
   };
 
   useEffect(() => {
-    if (isApproved || isDeclined) return;
+    if (!isActive || isApproved || isDeclined) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
@@ -191,7 +208,7 @@ export default function ConsentPromptCard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isApproved, isDeclined, showCustomPrompt, showJointSelector, selectedJoints, findingIds, customPrompt, sessionId, analysisId]);
+  }, [isActive, isApproved, isDeclined, showCustomPrompt, showJointSelector, selectedJoints, findingIds, customPrompt, sessionId, analysisId]);
 
   const toggleJoint = (joint: string) => {
     setSelectedJoints((prev) =>
@@ -479,7 +496,7 @@ export default function ConsentPromptCard({
             data-testid="decline-btn"
             onClick={handleDecline}
             disabled={isLoading}
-            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-900/90 hover:bg-red-950/50 text-zinc-300 hover:text-red-200 transition-colors flex items-center gap-1.5 border border-white/[0.15] hover:border-red-500/50 disabled:opacity-50 cursor-pointer ml-auto"
+            className="px-3 py-2 rounded-lg text-xs font-medium bg-zinc-900/90 hover:bg-red-950/50 text-zinc-300 hover:text-red-200 transition-colors flex items-center gap-1.5 border border-white/[0.15] hover:border-red-500/50 disabled:opacity-50 cursor-pointer sm:ml-auto"
           >
             <XCircle className="w-3.5 h-3.5" />
             <span>Decline / Keep Original</span>

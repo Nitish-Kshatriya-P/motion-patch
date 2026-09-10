@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Clock,
   Search,
+  RefreshCw,
 } from 'lucide-react';
 
 export interface SessionSummary {
@@ -88,6 +89,8 @@ interface SessionSidebarProps {
   isOpen: boolean;
   onToggleOpen: () => void;
   isLoading?: boolean;
+  sessionError?: string | null;
+  onRetry?: () => void;
 }
 
 export default function SessionSidebar({
@@ -98,6 +101,8 @@ export default function SessionSidebar({
   isOpen,
   onToggleOpen,
   isLoading,
+  sessionError,
+  onRetry,
 }: SessionSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -124,9 +129,23 @@ export default function SessionSidebar({
     );
   });
 
+  const handleSelect = (session: SessionSummary) => {
+    onSelectSession(session);
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      onToggleOpen();
+    }
+  };
+
+  const handleNew = () => {
+    onNewSession();
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      onToggleOpen();
+    }
+  };
+
   if (!isOpen) {
     return (
-      <div className="w-13 shrink-0 bg-[#0a0d14] border-r border-white/[0.08] flex flex-col items-center py-3 gap-3 select-none z-20">
+      <div className="hidden md:flex w-13 shrink-0 bg-[#0a0d14] border-r border-white/[0.08] flex-col items-center py-3 gap-3 select-none z-20">
         <button
           type="button"
           onClick={onToggleOpen}
@@ -137,7 +156,7 @@ export default function SessionSidebar({
         </button>
         <button
           type="button"
-          onClick={onNewSession}
+          onClick={handleNew}
           className="p-2 text-blue-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all cursor-pointer shadow-xs"
           title="New thread (Cmd+N)"
         >
@@ -148,21 +167,26 @@ export default function SessionSidebar({
   }
 
   return (
-    <aside className="w-72 shrink-0 bg-[#090c13] border-r border-white/[0.08] flex flex-col h-full select-none z-20">
-      <div className="flex items-center justify-between px-3.5 py-3 border-b border-white/[0.08]">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-xs tracking-wider uppercase text-zinc-400 font-mono">Threads</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-white/[0.06] text-zinc-400 text-[10px] font-mono tabular-nums">
-            {sessions.length}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onNewSession}
-            className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer shadow-[0_0_12px_rgba(37,99,235,0.3)]"
-            title="Start new thread (Cmd+N)"
-          >
+    <>
+      <div
+        onClick={onToggleOpen}
+        className="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 md:hidden"
+      />
+      <aside className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] md:relative md:w-72 md:inset-auto shrink-0 bg-[#090c13] border-r border-white/[0.08] flex flex-col h-full select-none shadow-2xl md:shadow-none animate-in slide-in-from-left duration-200">
+        <div className="flex items-center justify-between px-3.5 py-3 border-b border-white/[0.08]">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-xs tracking-wider uppercase text-zinc-400 font-mono">Threads</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-white/[0.06] text-zinc-400 text-[10px] font-mono tabular-nums">
+              {sessions.length}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleNew}
+              className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer shadow-[0_0_12px_rgba(37,99,235,0.3)]"
+              title="Start new thread (Cmd+N)"
+            >
             <Plus className="w-3.5 h-3.5" />
             <span>New</span>
           </button>
@@ -191,7 +215,24 @@ export default function SessionSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
-        {isLoading && sessions.length === 0 ? (
+        {sessionError ? (
+          <div className="p-3 bg-red-950/40 border border-red-500/30 rounded-xl flex flex-col gap-2 text-xs text-red-300">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{sessionError}</span>
+            </div>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded bg-red-900/60 hover:bg-red-800/80 text-white text-[11px] font-medium transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Retry</span>
+              </button>
+            )}
+          </div>
+        ) : isLoading && sessions.length === 0 ? (
           <div className="text-center text-xs text-zinc-500 py-8 font-mono">Loading threads...</div>
         ) : filteredSessions.length === 0 ? (
           <div className="text-center text-xs text-zinc-500 py-8 px-4 leading-relaxed">
@@ -207,7 +248,7 @@ export default function SessionSidebar({
               <button
                 key={session.session_id}
                 type="button"
-                onClick={() => onSelectSession(session)}
+                onClick={() => handleSelect(session)}
                 className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col gap-1.5 cursor-pointer relative ${
                   isActive
                     ? 'bg-zinc-900/90 border-blue-500/80 text-white shadow-lg shadow-black/40'
@@ -250,5 +291,6 @@ export default function SessionSidebar({
         )}
       </div>
     </aside>
+    </>
   );
 }
