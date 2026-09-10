@@ -38,7 +38,6 @@ from models import (
     AgentSpecification,
     RunExecutionRequest,
     LegacyRunBlenderRequest,
-    BatchFile,
     Status,
     compute_roster_hash,
 )
@@ -48,7 +47,6 @@ from agent import (
     validate_qa_script,
     generate_multi_agent_script,
 )
-from batch_orchestrator import process_batch_file
 
 SAMPLE_BVH = """HIERARCHY
 ROOT Hips
@@ -74,7 +72,7 @@ MOTION
 Frames: 2
 Frame Time: 0.033333
 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
-0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 2.0 1.0 1.0
 """
 
 @pytest.fixture
@@ -123,7 +121,7 @@ def test_setup():
         affected_joint="LeftFoot",
         affected_body_part=BodyPart.FOOT,
         frame_start=0,
-        frame_end=2,
+        frame_end=1,
         time_start=0.0,
         time_end=0.066,
         anomaly_type=AnomalyType.PLANTED_FOOT_SLIDING,
@@ -263,7 +261,7 @@ def test_runs_end_to_end(test_setup):
         "approval_id": "approval-multi-01",
     }
     response = client.post("/runs", json=req)
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
     data = response.json()
     assert data["status"] == "COMPLETED"
     assert "asset_id" in data
@@ -313,32 +311,6 @@ def test_run_blender_user_edited_script(test_setup):
         asset = get_asset(conn, new_asset_id)
         assert asset is not None
         assert asset.filename == "edited_test_motion.bvh"
-
-def test_batch_orchestrator_dynamic_agents():
-    temp_dir = tempfile.mkdtemp()
-    test_bvh_file = os.path.join(temp_dir, "batch_test.bvh")
-    with open(test_bvh_file, "w", encoding="utf-8") as f:
-        f.write(SAMPLE_BVH)
-
-    batch_file = BatchFile(
-        id="batch-file-01",
-        original_name="batch_test.bvh",
-        path=test_bvh_file,
-        status=Status.PENDING,
-    )
-    class MockInstruction:
-        prompt = "Fix foot sliding and smooth jitter"
-
-    import asyncio
-    success = asyncio.run(
-        process_batch_file(batch_file, MockInstruction(), SAMPLE_BVH, temp_dir)
-    )
-    assert success is True
-    assert batch_file.status == Status.COMPLETED
-    assert batch_file.output_path is not None
-    assert os.path.exists(batch_file.output_path)
-    shutil.rmtree(temp_dir, ignore_errors=True)
-
 def test_runs_unapproved_rejection(test_setup):
     client, _, _, _ = test_setup
     req = {

@@ -225,3 +225,114 @@ Frame Time: 0.033333
     assert files_data["remaining"] == 0
     assert len(files_data["files"]) == 5
 
+
+def test_session_chat_messages_persistence(client):
+    test_client, db_path = client
+    bvh_content = b"""HIERARCHY
+ROOT Hips
+{
+  OFFSET 0.0 0.0 0.0
+  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+  End Site
+  {
+    OFFSET 0.0 1.0 0.0
+  }
+}
+MOTION
+Frames: 2
+Frame Time: 0.033333
+0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0 0.0 0.0
+"""
+    res1 = test_client.post(
+        "/upload",
+        files={"file": ("test_msg.bvh", io.BytesIO(bvh_content), "application/octet-stream")},
+    )
+    assert res1.status_code == 200
+    session_id = res1.json()["session_id"]
+
+    empty_res = test_client.get(f"/sessions/{session_id}/messages")
+    assert empty_res.status_code == 200
+    assert empty_res.json()["messages"] == []
+
+    post_res = test_client.post(
+        f"/sessions/{session_id}/messages",
+        json={
+            "messages": [
+                {
+                    "id": "msg-1",
+                    "sender": "user",
+                    "text": "Smooth foot sliding",
+                    "timestamp": "2026-09-10T12:00:00Z",
+                },
+                {
+                    "id": "msg-2",
+                    "sender": "assistant",
+                    "text": "Plan proposed",
+                    "timestamp": "2026-09-10T12:00:01Z",
+                    "proposedPlan": {"plan_id": "p-1"},
+                },
+            ]
+        },
+    )
+    assert post_res.status_code == 200
+    assert len(post_res.json()["messages"]) == 2
+
+    get_res = test_client.get(f"/sessions/{session_id}/messages")
+    assert get_res.status_code == 200
+    msgs = get_res.json()["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["id"] == "msg-1"
+    assert msgs[0]["text"] == "Smooth foot sliding"
+    assert msgs[1]["proposedPlan"]["plan_id"] == "p-1"
+
+    del_res = test_client.delete(f"/sessions/{session_id}/messages")
+    assert del_res.status_code == 200
+
+    after_del = test_client.get(f"/sessions/{session_id}/messages")
+    assert after_del.status_code == 200
+    assert after_del.json()["messages"] == []
+
+
+def test_session_chat_unbound_reply_fallback(client):
+    test_client, db_path = client
+    bvh_content = b"""HIERARCHY
+ROOT Hips
+{
+  OFFSET 0.0 0.0 0.0
+  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+  End Site
+  {
+    OFFSET 0.0 1.0 0.0
+  }
+}
+MOTION
+Frames: 2
+Frame Time: 0.033333
+0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0 0.0 0.0
+"""
+    upload_res = test_client.post(
+        "/upload",
+        files={"file": ("chat_test.bvh", io.BytesIO(bvh_content), "application/octet-stream")},
+    )
+    assert upload_res.status_code == 200
+    session_id = upload_res.json()["session_id"]
+
+    chat_res = test_client.post(
+        f"/sessions/{session_id}/chat",
+        json={"message": "Hello general conversation test without keywords"},
+    )
+    assert chat_res.status_code == 200
+    data = chat_res.json()
+    assert "reply" in data
+    assert len(data["reply"]) > 0
+
+    msgs_res = test_client.get(f"/sessions/{session_id}/messages")
+    assert msgs_res.status_code == 200
+    msgs = msgs_res.json()["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["text"] == "Hello general conversation test without keywords"
+    assert msgs[1]["text"] == data["reply"]
+
+

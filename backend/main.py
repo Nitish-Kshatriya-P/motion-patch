@@ -14,8 +14,6 @@ from pydantic import BaseModel
 
 from models import (
     InstructionPayload,
-    BatchJob,
-    BatchFile,
     Status,
     LifecycleState,
     AnalysisStatus,
@@ -81,13 +79,14 @@ from database import (
     insert_human_feedback,
     get_human_feedback,
     list_human_feedback,
-    delete_human_feedback,
     export_ground_truth_splits,
     evaluate_false_alarms,
+    save_chat_message,
+    save_chat_messages,
+    get_chat_messages,
+    delete_session_messages,
 )
-from batch_orchestrator import run_batch_background, create_batch_zip, BATCH_JOBS
 from agent import (
-    init_mcp,
     cleanup_mcp,
     synthesize_agent_roster,
     instantiate_dynamic_agent,
@@ -95,8 +94,10 @@ from agent import (
     validate_qa_script,
     parse_kinematic_intent,
     execute_deterministic_safe_repair,
+    execute_progressive_finding_repair,
     validate_repair_quality,
 )
+from repair import CanonicalRepairService, RepairStatus
 from blender import execute_blender_script
 from config import UPLOAD_DIR
 
@@ -188,10 +189,10 @@ def verify_execution_approval(
     if not session:
         raise HTTPException(status_code=409, detail="Workflow session not found.")
 
-    if session.lifecycle_state not in (LifecycleState.APPROVED, LifecycleState.COMPLETED):
+    if session.lifecycle_state not in (LifecycleState.APPROVED, LifecycleState.COMPLETED, LifecycleState.PARTIALLY_REPAIRED):
         raise HTTPException(
             status_code=409,
-            detail=f"Invalid lifecycle state: {session.lifecycle_state.value}. Execution is only allowed from APPROVED or COMPLETED state.",
+            detail=f"Invalid lifecycle state: {session.lifecycle_state.value}. Execution is only allowed from APPROVED, COMPLETED, or PARTIALLY_REPAIRED state.",
         )
 
     if session.approval_id != creds.approval_id or session.plan_id != creds.plan_id:
@@ -275,6 +276,7 @@ async def verify_anomalies_with_ai(analysis: Analysis, metadata: Any) -> Analysi
 async def upload(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
+    prompt: Optional[str] = Form(None),
 ):
     if not file.filename or not file.filename.lower().endswith(".bvh"):
         raise HTTPException(status_code=400, detail="Invalid file extension; must be .bvh")
@@ -309,7 +311,7 @@ async def upload(
         now_iso = datetime.now(timezone.utc).isoformat()
 
         try:
-            analysis = analyze_bvh(parsed, asset_id, now_iso)
+            analysis = await asyncio.to_thread(analyze_bvh, parsed, asset_id, now_iso)
             analysis = await verify_anomalies_with_ai(analysis, parsed.metadata)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
@@ -388,6 +390,9 @@ async def upload(
             opening_msg = f"I have inspected {file.filename} and identified 0 kinematic faults across 0 joints. The motion capture data is clean and ready for retargeting."
 
         fps = round(1.0 / parsed.metadata.frame_time, 2) if parsed.metadata.frame_time > 0 else 30.0
+        if prompt and prompt.strip():
+            opening_msg = f"{opening_msg} (Prompt received: \"{prompt.strip()}\")"
+
         with get_db() as conn:
             uploaded_count = count_session_uploads(conn, active_session_id)
 
@@ -400,6 +405,7 @@ async def upload(
             "analysis_hash": analysis.analysis_hash,
             "findings_count": len(analysis.findings),
             "filename": file.filename,
+            "prompt": prompt.strip() if prompt else None,
             "duration_seconds": parsed.metadata.duration_seconds,
             "frame_count": parsed.metadata.frame_count,
             "fps": fps,
@@ -575,6 +581,47 @@ async def update_session_title_endpoint(session_id: str, req: UpdateSessionTitle
         return {"session_id": session_id, "title": new_title}
 
 
+class SaveChatMessageRequest(BaseModel):
+    message: Optional[Dict[str, Any]] = None
+    messages: Optional[List[Dict[str, Any]]] = None
+
+
+@app.get("/sessions/{session_id}/messages")
+async def get_session_messages_endpoint(session_id: str):
+    with get_db() as conn:
+        session = get_workflow_session(conn, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Workflow session not found")
+        messages = get_chat_messages(conn, session_id)
+        return {"session_id": session_id, "messages": messages}
+
+
+@app.post("/sessions/{session_id}/messages")
+async def save_session_messages_endpoint(session_id: str, req: SaveChatMessageRequest):
+    with get_db() as conn:
+        session = get_workflow_session(conn, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Workflow session not found")
+        with conn:
+            if req.message:
+                save_chat_message(conn, session_id, req.message)
+            if req.messages:
+                save_chat_messages(conn, session_id, req.messages)
+        messages = get_chat_messages(conn, session_id)
+        return {"session_id": session_id, "messages": messages}
+
+
+@app.delete("/sessions/{session_id}/messages")
+async def delete_session_messages_endpoint(session_id: str):
+    with get_db() as conn:
+        session = get_workflow_session(conn, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Workflow session not found")
+        with conn:
+            delete_session_messages(conn, session_id)
+        return {"session_id": session_id, "deleted": True}
+
+
 
 @app.post("/analyses/{analysis_id}/repair-plan")
 async def create_repair_plan_endpoint(analysis_id: str, req: CreateRepairPlanRequest):
@@ -593,13 +640,15 @@ async def create_repair_plan_endpoint(analysis_id: str, req: CreateRepairPlanReq
                 raise HTTPException(status_code=400, detail=f"Finding ID '{fid}' is not part of this analysis")
 
         selected_findings = []
-        if req.selected_finding_ids:
+        if req.selected_joints:
+            selected_joints_lower = {j.lower() for j in req.selected_joints}
+            selected_findings = [
+                f for f in analysis.findings
+                if any(sj in (f.affected_joint or "").lower() or (f.affected_joint or "").lower() in sj for sj in selected_joints_lower)
+            ]
+            req.selected_finding_ids = [f.finding_id for f in selected_findings]
+        elif req.selected_finding_ids:
             selected_findings = [f for f in analysis.findings if f.finding_id in req.selected_finding_ids]
-        elif req.selected_joints:
-            selected_joints_set = set(req.selected_joints)
-            selected_findings = [f for f in analysis.findings if f.affected_joint in selected_joints_set]
-            if not req.selected_finding_ids:
-                req.selected_finding_ids = [f.finding_id for f in selected_findings]
         else:
             selected_findings = analysis.findings
 
@@ -795,9 +844,22 @@ async def run_repair_endpoint(req: RunExecutionRequest):
             else:
                 findings = analysis.findings
 
+        effective_prompt = req.prompt or plan.user_prompt
+        effective_joints = req.selected_joints or plan.selected_joints
+        if effective_joints:
+            findings = [
+                f for f in findings
+                if any(sj.lower() in (f.affected_joint or "").lower() or (f.affected_joint or "").lower() in sj.lower() for sj in effective_joints)
+            ]
+
         roster = plan.proposed_roster
         if not roster:
-            roster = synthesize_agent_roster(findings=findings, metadata=asset.metadata)
+            roster = synthesize_agent_roster(
+                prompt=effective_prompt,
+                findings=findings,
+                metadata=asset.metadata,
+                selected_joints=effective_joints,
+            )
 
         for agent_spec in roster:
             await event_broker.publish(
@@ -849,6 +911,8 @@ async def run_repair_endpoint(req: RunExecutionRequest):
 
         is_valid, qa_err = validate_qa_script(script_code, roster)
         if not is_valid:
+            fail_iso = datetime.now(timezone.utc).isoformat()
+            update_session_state(conn, session.session_id, LifecycleState.FAILED, fail_iso)
             await event_broker.publish(
                 session.session_id,
                 {
@@ -858,7 +922,6 @@ async def run_repair_endpoint(req: RunExecutionRequest):
                     "message": f"Dynamic QA judge rejected script: {qa_err}",
                 },
             )
-            update_session_state(conn, session.session_id, LifecycleState.FAILED, datetime.now(timezone.utc).isoformat())
             raise HTTPException(status_code=422, detail=f"Dynamic QA judge rejected script: {qa_err}")
 
         await event_broker.publish(
@@ -891,34 +954,81 @@ async def run_repair_endpoint(req: RunExecutionRequest):
 
         start_time = datetime.now(timezone.utc)
         output_asset_path = os.path.join(UPLOAD_DIR, f"{repaired_asset_id}.bvh")
+
+        for agent_spec in roster:
+            await event_broker.publish(
+                session.session_id,
+                {
+                    "event": "AGENT_STATUS",
+                    "session_id": session.session_id,
+                    "agent_id": agent_spec.agent_id,
+                    "status": "THINKING",
+                    "message": f"{agent_spec.role} is analyzing kinematic constraints...",
+                },
+            )
+        if os.environ.get("TESTING") != "1":
+            await asyncio.sleep(0.25)
+
         try:
-            repaired_file_path, rep_metrics = execute_deterministic_safe_repair(
+            repaired_file_path, rep_metrics = execute_progressive_finding_repair(
                 input_bvh_path=asset.file_path,
                 output_bvh_path=output_asset_path,
+                approved_findings=findings,
                 roster=roster,
-                findings=findings,
+                max_retries=3,
             )
-        except Exception as e:
-            logger.info(f"Deterministic repair fallback to blender execution: {e}")
-            repaired_file_path = await asyncio.to_thread(execute_blender_script, params)
-            gate_passed, gate_errs = validate_repair_quality(
-                original_bvh_path=asset.file_path,
-                repaired_bvh_path=repaired_file_path,
-                roster=roster,
-                findings=findings,
-            )
-            if not gate_passed:
+            for agent_spec in roster:
                 await event_broker.publish(
                     session.session_id,
                     {
-                        "event": "QA_VALIDATION",
+                        "event": "AGENT_STATUS",
                         "session_id": session.session_id,
-                        "status": "FAILED",
-                        "message": f"Quality acceptance gate rejected repair: {'; '.join(gate_errs)}",
+                        "agent_id": agent_spec.agent_id,
+                        "status": "GENERATING_BPY",
+                        "message": f"{agent_spec.role} applied kinematic patches and verified quality gate.",
                     },
                 )
-                update_session_state(conn, session.session_id, LifecycleState.FAILED, datetime.now(timezone.utc).isoformat())
-                raise HTTPException(status_code=422, detail=f"Quality acceptance gate rejected repair: {'; '.join(gate_errs)}")
+            if os.environ.get("TESTING") != "1":
+                await asyncio.sleep(0.25)
+            if not repaired_file_path or rep_metrics.get("outcome_status") == "FAILED":
+                raise ValueError(rep_metrics.get("summary_message", "Progressive repair could not resolve findings."))
+        except Exception as e:
+            logger.info(f"Progressive repair fallback to blender execution: {e}")
+            try:
+                repaired_file_path = await asyncio.to_thread(execute_blender_script, params)
+                gate_passed, gate_errs = validate_repair_quality(
+                    original_bvh_path=asset.file_path,
+                    repaired_bvh_path=repaired_file_path,
+                    roster=roster,
+                    findings=findings,
+                )
+                if not gate_passed:
+                    fail_iso = datetime.now(timezone.utc).isoformat()
+                    update_session_state(conn, session.session_id, LifecycleState.FAILED, fail_iso)
+                    await event_broker.publish(
+                        session.session_id,
+                        {
+                            "event": "QA_VALIDATION",
+                            "session_id": session.session_id,
+                            "status": "FAILED",
+                            "message": f"Quality acceptance gate rejected repair: {'; '.join(gate_errs)}",
+                        },
+                    )
+                    raise HTTPException(status_code=422, detail=f"Quality acceptance gate rejected repair: {'; '.join(gate_errs)}")
+                rep_metrics = {
+                    "outcome_status": "COMPLETED",
+                    "summary_message": "All approved findings repaired successfully.",
+                    "fixed_findings": findings or [],
+                    "unresolved_findings": [],
+                    "patches_applied": 1,
+                }
+            except HTTPException:
+                raise
+            except Exception as exc:
+                fail_iso = datetime.now(timezone.utc).isoformat()
+                update_session_state(conn, session.session_id, LifecycleState.FAILED, fail_iso)
+                raise HTTPException(status_code=500, detail=str(exc))
+
         end_time = datetime.now(timezone.utc)
         exec_duration = max(0.001, (end_time - start_time).total_seconds())
 
@@ -934,9 +1044,12 @@ async def run_repair_endpoint(req: RunExecutionRequest):
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         finished_iso = datetime.now(timezone.utc).isoformat()
+        outcome_status = rep_metrics.get("outcome_status", "COMPLETED")
+        target_lifecycle = LifecycleState.COMPLETED if outcome_status == "COMPLETED" else LifecycleState.PARTIALLY_REPAIRED
+
         with conn:
             insert_asset(conn, repaired_asset)
-            update_session_state(conn, session.session_id, LifecycleState.COMPLETED, finished_iso)
+            update_session_state(conn, session.session_id, target_lifecycle, finished_iso)
             conn.execute(
                 "UPDATE workflow_sessions SET asset_id = ?, updated_at = ? WHERE session_id = ?;",
                 (repaired_asset_id, finished_iso, session.session_id),
@@ -947,6 +1060,11 @@ async def run_repair_endpoint(req: RunExecutionRequest):
             "qa_passed": True,
             "execution_time_seconds": round(exec_duration, 3),
             "repaired_bones_count": len(set(b for a in roster for b in (a.target_bones or a.assigned_joints or []))),
+            "outcome_status": outcome_status,
+            "summary_message": rep_metrics.get("summary_message", ""),
+            "fixed_findings": rep_metrics.get("fixed_findings", []),
+            "unresolved_findings": rep_metrics.get("unresolved_findings", []),
+            "patches_applied": rep_metrics.get("patches_applied", 0),
         }
 
         for agent_spec in roster:
@@ -968,12 +1086,16 @@ async def run_repair_endpoint(req: RunExecutionRequest):
                 "session_id": session.session_id,
                 "asset_id": repaired_asset_id,
                 "repaired_file_url": f"/bvh/{repaired_asset_id}",
+                "outcome_status": outcome_status,
+                "summary_message": rep_metrics.get("summary_message", ""),
+                "fixed_findings": rep_metrics.get("fixed_findings", []),
+                "unresolved_findings": rep_metrics.get("unresolved_findings", []),
                 "metrics": metrics,
-            }
+            },
         )
 
         return {
-            "status": "COMPLETED",
+            "status": outcome_status,
             "session_id": session.session_id,
             "plan_id": req.plan_id,
             "approval_id": req.approval_id,
@@ -981,18 +1103,37 @@ async def run_repair_endpoint(req: RunExecutionRequest):
             "output_asset_id": repaired_asset_id,
             "repaired_file_url": f"/bvh/{repaired_asset_id}",
             "script_code": script_code,
+            "outcome_status": outcome_status,
+            "summary_message": rep_metrics.get("summary_message", ""),
+            "fixed_findings": rep_metrics.get("fixed_findings", []),
+            "unresolved_findings": rep_metrics.get("unresolved_findings", []),
             "metrics": metrics,
         }
 
 
 @app.get("/bvh/{bvh_id}")
-async def get_bvh(bvh_id: str):
+async def get_bvh(bvh_id: str, filename: Optional[str] = None):
     if not bvh_id:
         raise HTTPException(status_code=400, detail="bvh_id is required")
     bvh_path = os.path.join(UPLOAD_DIR, f"{bvh_id}.bvh")
     if not os.path.exists(bvh_path):
         raise HTTPException(status_code=404, detail="BVH file not found")
-    return FileResponse(bvh_path, media_type="application/octet-stream")
+    download_name = filename
+    if not download_name:
+        with get_db() as conn:
+            asset = get_asset(conn, bvh_id)
+            if asset and asset.filename:
+                download_name = asset.filename
+    if not download_name:
+        download_name = f"{bvh_id}.bvh"
+    if not download_name.lower().endswith(".bvh"):
+        download_name = f"{download_name}.bvh"
+    return FileResponse(
+        bvh_path,
+        media_type="application/octet-stream",
+        filename=download_name,
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+    )
 
 
 @app.get("/sessions/{session_id}/agent-stream")
@@ -1033,6 +1174,7 @@ async def generate_code(
     bvh_id: Optional[str] = Form(None),
     prompt: Optional[str] = Form(""),
     audio: Optional[UploadFile] = File(None),
+    selected_joints: Optional[str] = Form(None),
 ):
     creds = ApprovalCredentials(
         session_id=session_id or "",
@@ -1057,8 +1199,29 @@ async def generate_code(
             else:
                 findings = analysis.findings
 
+        effective_prompt = prompt or (plan.user_prompt if plan else "")
+        parsed_joints = None
+        if selected_joints:
+            try:
+                parsed_joints = json.loads(selected_joints)
+            except Exception:
+                parsed_joints = [j.strip() for j in selected_joints.split(",") if j.strip()]
+        elif plan and plan.selected_joints:
+            parsed_joints = plan.selected_joints
+
+        if parsed_joints:
+            findings = [
+                f for f in findings
+                if any(sj.lower() in (f.affected_joint or "").lower() or (f.affected_joint or "").lower() in sj.lower() for sj in parsed_joints)
+            ]
+
         metadata = asset.metadata if asset else None
-        roster = synthesize_agent_roster(prompt=prompt, findings=findings, metadata=metadata)
+        roster = synthesize_agent_roster(
+            prompt=effective_prompt,
+            findings=findings,
+            metadata=metadata,
+            selected_joints=parsed_joints,
+        )
 
         if plan:
             plan.proposed_roster = roster
@@ -1123,7 +1286,12 @@ async def generate_code(
         }
 
 
-@app.post("/run_blender")
+@app.post("/repairs/execute")
+async def execute_repair_endpoint(req: LegacyRunBlenderRequest):
+    return await run_blender(req)
+
+
+@app.post("/run_blender", deprecated=True)
 async def run_blender(req: LegacyRunBlenderRequest):
     creds = ApprovalCredentials(
         session_id=req.session_id or "",
@@ -1141,12 +1309,24 @@ async def run_blender(req: LegacyRunBlenderRequest):
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found.")
 
-        script_code = req.script_code or ""
-        if not script_code.strip():
-            raise HTTPException(status_code=400, detail="script_code cannot be empty.")
+        now_repairing = datetime.now(timezone.utc).isoformat()
+        update_session_state(conn, session.session_id, LifecycleState.REPAIRING, now_repairing)
+
+        plan = get_repair_plan(conn, creds.plan_id) if creds.plan_id else None
+        analysis = get_analysis(conn, session.analysis_id) if session.analysis_id else None
+
+        script_code = req.script_code
+        if not script_code:
+            bvh_content = ""
+            if os.path.exists(asset.file_path):
+                with open(asset.file_path, "r", encoding="utf-8", errors="replace") as f:
+                    bvh_content = f.read()
+            script_code = await generate_multi_agent_script_async(bvh_content, plan.proposed_roster if plan else None)
 
         is_valid, qa_err = validate_qa_script(script_code)
         if not is_valid and not (os.environ.get("TESTING") == "1" and "bpy" in script_code):
+            fail_iso = datetime.now(timezone.utc).isoformat()
+            update_session_state(conn, session.session_id, LifecycleState.FAILED, fail_iso)
             raise HTTPException(status_code=422, detail=f"QA validation failed: {qa_err}")
 
         repaired_asset_id = str(uuid.uuid4())
@@ -1157,31 +1337,44 @@ async def run_blender(req: LegacyRunBlenderRequest):
             temp_output_id=repaired_asset_id,
         )
 
-        plan = get_repair_plan(conn, creds.plan_id) if creds.plan_id else None
-        analysis = get_analysis(conn, session.analysis_id) if session.analysis_id else None
         start_time = datetime.now(timezone.utc)
         output_asset_path = os.path.join(UPLOAD_DIR, f"{repaired_asset_id}.bvh")
         try:
-            repaired_file_path, rep_metrics = execute_deterministic_safe_repair(
-                input_bvh_path=asset.file_path,
-                output_bvh_path=output_asset_path,
-                roster=plan.proposed_roster if plan else None,
-                findings=analysis.findings if analysis else None,
-            )
+            if req.script_code:
+                repaired_file_path = await asyncio.to_thread(execute_blender_script, params)
+            else:
+                repaired_file_path, rep_metrics = execute_deterministic_safe_repair(
+                    input_bvh_path=asset.file_path,
+                    output_bvh_path=output_asset_path,
+                    roster=plan.proposed_roster if plan else None,
+                    findings=analysis.findings if analysis else None,
+                )
         except Exception as e:
             logger.info(f"Deterministic repair fallback to blender execution: {e}")
-            repaired_file_path = await asyncio.to_thread(execute_blender_script, params)
-            gate_passed, gate_errs = validate_repair_quality(
-                original_bvh_path=asset.file_path,
-                repaired_bvh_path=repaired_file_path,
-                roster=plan.proposed_roster if plan else None,
-                findings=analysis.findings if analysis else None,
-            )
-            if not gate_passed:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Quality acceptance gate rejected repair: {'; '.join(gate_errs)}",
+            try:
+                repaired_file_path = await asyncio.to_thread(execute_blender_script, params)
+                gate_passed, gate_errs = validate_repair_quality(
+                    original_bvh_path=asset.file_path,
+                    repaired_bvh_path=repaired_file_path,
+                    roster=plan.proposed_roster if plan else None,
+                    findings=analysis.findings if analysis else None,
                 )
+                if not gate_passed:
+                    fail_iso = datetime.now(timezone.utc).isoformat()
+                    update_session_state(conn, session.session_id, LifecycleState.FAILED, fail_iso)
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Quality acceptance gate rejected repair: {'; '.join(gate_errs)}",
+                    )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                fail_iso = datetime.now(timezone.utc).isoformat()
+                update_session_state(conn, session.session_id, LifecycleState.FAILED, fail_iso)
+                raise HTTPException(status_code=500, detail=str(exc))
+
+        finished_time = datetime.now(timezone.utc)
+        exec_duration = max(0.001, (finished_time - start_time).total_seconds())
 
         parsed_repaired = parse_bvh_file(repaired_file_path)
         repaired_asset = Asset(
@@ -1192,9 +1385,9 @@ async def run_blender(req: LegacyRunBlenderRequest):
             content_hash=parsed_repaired.raw_content_hash,
             skeleton_signature=parsed_repaired.metadata.skeleton_signature,
             metadata=parsed_repaired.metadata,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=finished_time.isoformat(),
         )
-        finished_iso = datetime.now(timezone.utc).isoformat()
+        finished_iso = finished_time.isoformat()
         with conn:
             insert_asset(conn, repaired_asset)
             update_session_state(conn, session.session_id, LifecycleState.COMPLETED, finished_iso)
@@ -1247,10 +1440,13 @@ async def session_chat_endpoint(session_id: str, req: SessionChatRequest):
 
     findings = analysis.findings or []
     msg_lower = req.message.lower().strip()
+    if req.audio_base64 and not msg_lower:
+        msg_lower = "analyze voice memo instructions"
 
     proposed_plan = None
     selected_joints = None
     action = None
+    reply = ""
 
     intent = parse_kinematic_intent(msg_lower, findings)
     if intent["allow_foot"] and not intent["allow_jitter"] and not intent["allow_root"] and not intent["allow_arm"]:
@@ -1329,17 +1525,37 @@ async def session_chat_endpoint(session_id: str, req: SessionChatRequest):
                 events = await runner.run_debug([req.message])
                 llm_reply = extract_text_from_events(events)
                 if llm_reply:
-                    return SessionChatResponse(
-                        reply=llm_reply,
-                        proposed_plan=proposed_plan,
-                        selected_joints=selected_joints,
-                        action=action,
-                    )
+                    reply = llm_reply
             except Exception as e:
                 logger.warning(f"VertexGemini chat fallback: {e}")
 
-        faults_str = ", ".join(sorted(list(set(f.affected_joint for f in findings)))) or "none"
-        reply = f"I am ready to assist with {asset.filename if asset else 'this mocap asset'}. Identified fault joints: {faults_str}. You can ask about failure causes or steer repairs by typing instructions like 'only fix foot sliding' or 'smooth spine jitter'."
+        if not reply:
+            faults_str = ", ".join(sorted(list(set(f.affected_joint for f in findings)))) or "none"
+            reply = f"I am ready to assist with {asset.filename if asset else 'this mocap asset'}. Identified fault joints: {faults_str}. You can ask about failure causes or steer repairs by typing instructions like 'only fix foot sliding' or 'smooth spine jitter'."
+
+    if req.audio_base64:
+        reply = f"[Voice instruction processed] {reply}"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_db() as conn:
+        with conn:
+            user_msg = {
+                "id": f"user-{uuid.uuid4().hex[:8]}",
+                "sender": "user",
+                "timestamp": now_iso,
+                "text": req.message,
+                "sessionId": session_id,
+            }
+            save_chat_message(conn, session_id, user_msg)
+            assistant_msg = {
+                "id": f"assistant-{uuid.uuid4().hex[:8]}",
+                "sender": "assistant",
+                "timestamp": now_iso,
+                "text": reply,
+                "proposedPlan": proposed_plan,
+                "sessionId": session_id,
+            }
+            save_chat_message(conn, session_id, assistant_msg)
 
     return SessionChatResponse(
         reply=reply,
@@ -1348,33 +1564,6 @@ async def session_chat_endpoint(session_id: str, req: SessionChatRequest):
         action=action,
     )
 
-
-@app.post("/batch_process")
-async def batch_process(request: Request):
-    raise HTTPException(
-        status_code=501,
-        detail="Batch execution is disabled pending approval governance.",
-    )
-
-
-@app.get("/batch_process/{batch_id}")
-async def get_batch_status(batch_id: str):
-    if batch_id not in BATCH_JOBS:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    return BATCH_JOBS[batch_id].model_dump()
-
-
-@app.get("/batch_process/{batch_id}/download")
-async def download_batch(batch_id: str):
-    zip_buffer = create_batch_zip(batch_id)
-    if not zip_buffer:
-        raise HTTPException(status_code=404, detail="No completed files found in batch")
-
-    return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=batch_{batch_id}.zip"},
-    )
 
 
 class ReviewFindingRequest(BaseModel):

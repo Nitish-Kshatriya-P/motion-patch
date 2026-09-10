@@ -6,7 +6,8 @@ import ast
 import uuid
 import json
 import re
-from typing import Optional, List, Dict, Any, Tuple, Set
+import copy
+from typing import Optional, List, Dict, Any, Tuple, Set, Callable, Union
 
 from google.adk import Agent
 from google.adk.runners import InMemoryRunner
@@ -18,9 +19,23 @@ from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 try:
     from google.adk.tools.mcp_tool import McpToolset as MCPToolset
-except ImportError:
-    from google.adk.tools.mcp_tool import MCPToolset
-from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams, StreamableHTTPConnectionParams
+except (ImportError, AttributeError):
+    try:
+        from google.adk.tools.mcp_tool.mcp_toolset import McpToolset as MCPToolset
+    except (ImportError, AttributeError):
+        try:
+            from google.adk.tools.mcp_tool import MCPToolset
+        except (ImportError, AttributeError):
+            MCPToolset = None
+
+try:
+    from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams, StreamableHTTPConnectionParams
+except (ImportError, AttributeError):
+    try:
+        from google.adk.tools.mcp_tool import StdioConnectionParams, StreamableHTTPConnectionParams
+    except (ImportError, AttributeError):
+        StdioConnectionParams = None
+        StreamableHTTPConnectionParams = None
 
 from config import BLENDER_BOILERPLATE
 from models import AgentSpecification, Finding, BVHMetadata
@@ -35,9 +50,11 @@ from detector import (
 
 logger = logging.getLogger(__name__)
 
-def get_clickhouse_mcp_toolset() -> Optional[MCPToolset]:
+def get_clickhouse_mcp_toolset() -> Optional[Any]:
+    if MCPToolset is None:
+        return None
     mcp_url = os.environ.get("CLICKHOUSE_MCP_URL")
-    if mcp_url:
+    if mcp_url and StreamableHTTPConnectionParams is not None:
         try:
             return MCPToolset(
                 connection_params=StreamableHTTPConnectionParams(
@@ -49,6 +66,8 @@ def get_clickhouse_mcp_toolset() -> Optional[MCPToolset]:
             )
         except Exception as e:
             logger.warning(f"Failed to initialize HTTP MCPToolset: {e}")
+    if StdioConnectionParams is None:
+        return None
     mcp_path = os.path.join(os.path.dirname(__file__), "mcp_server.py")
     try:
         server_params = StdioServerParameters(
@@ -268,13 +287,30 @@ def parse_kinematic_intent(
     frame_start = int(frame_match.group(1)) if frame_match else None
     frame_end = int(frame_match.group(2)) if frame_match else None
 
-    has_only = any(k in text_lower for k in ("only", "just", "exclusively", "solely"))
-    target_foot = any(k in text_lower for k in ("foot", "feet", "slide", "sliding", "toe", "ankle", "ground", "pin"))
-    target_spine = any(k in text_lower for k in ("spine", "torso", "neck", "jitter", "smooth"))
-    target_root = any(k in text_lower for k in ("root", "hips", "drift", "jump", "teleport", "discontinuity"))
-    target_arm = any(k in text_lower for k in ("arm", "shoulder", "elbow", "wrist", "hand"))
+    ignore_foot = any(k in text_lower for k in ("ignore foot", "ignore feet", "skip foot", "without foot", "don't touch foot", "dont touch foot", "don't touch the foot", "dont touch the foot"))
+    ignore_spine = any(k in text_lower for k in ("ignore spine", "skip spine", "without spine", "don't touch spine", "dont touch spine", "don't touch the spine", "dont touch the spine"))
+    ignore_root = any(k in text_lower for k in ("ignore root", "skip root", "without root", "ignore hips", "don't touch root", "dont touch root", "don't touch hips"))
+    ignore_arm = any(k in text_lower for k in ("ignore arm", "skip arm", "without arm", "don't touch arm", "dont touch arm"))
 
-    if has_only:
+    sanitized_text = text_lower
+    for ig in (
+        "ignore foot", "ignore feet", "skip foot", "without foot", "don't touch foot", "dont touch foot", "don't touch the foot", "dont touch the foot",
+        "ignore spine", "skip spine", "without spine", "don't touch spine", "dont touch spine", "don't touch the spine", "dont touch the spine",
+        "ignore root", "skip root", "without root", "ignore hips", "don't touch root", "dont touch root", "don't touch hips",
+        "ignore arm", "skip arm", "without arm", "don't touch arm", "dont touch arm",
+    ):
+        sanitized_text = sanitized_text.replace(ig, "")
+
+    has_only = any(k in text_lower for k in ("only", "just", "exclusively", "solely"))
+    target_foot = any(k in sanitized_text for k in ("foot", "feet", "slide", "sliding", "toe", "ankle", "ground", "pinning", "pinned")) or bool(re.search(r"\bpin\b", sanitized_text))
+    target_spine = any(k in sanitized_text for k in ("spine", "torso", "neck", "jitter", "smooth"))
+    target_root = any(k in sanitized_text for k in ("root", "hips", "drift", "jump", "teleport", "discontinuity"))
+    target_arm = any(k in sanitized_text for k in ("arm", "shoulder", "elbow", "wrist", "hand"))
+
+    has_all = any(k in text_lower for k in ("all", "everything", "entire", "full body", "whole"))
+    has_targeted = target_foot or target_spine or target_root or target_arm
+
+    if has_only or (has_targeted and not has_all and bool(sanitized_text.strip())):
         allow_foot = target_foot
         allow_jitter = target_spine
         allow_root = target_root
@@ -284,11 +320,6 @@ def parse_kinematic_intent(
         allow_jitter = True
         allow_root = True
         allow_arm = True
-
-    ignore_foot = any(k in text_lower for k in ("ignore foot", "ignore feet", "skip foot", "without foot", "don't touch foot", "dont touch foot", "don't touch the foot", "dont touch the foot"))
-    ignore_spine = any(k in text_lower for k in ("ignore spine", "skip spine", "without spine", "don't touch spine", "dont touch spine", "don't touch the spine", "dont touch the spine"))
-    ignore_root = any(k in text_lower for k in ("ignore root", "skip root", "without root", "ignore hips", "don't touch root", "dont touch root", "don't touch hips"))
-    ignore_arm = any(k in text_lower for k in ("ignore arm", "skip arm", "without arm", "don't touch arm", "dont touch arm"))
 
     if ignore_foot:
         allow_foot = False
@@ -323,6 +354,18 @@ def parse_kinematic_intent(
             if "hips" in j_lower or "root" in j_lower:
                 if joint and joint not in selected_joints:
                     selected_joints.append(joint)
+    if allow_arm:
+        for f in norm_findings:
+            joint = f.get("affected_joint", "")
+            j_lower = joint.lower()
+            if "arm" in j_lower or "shoulder" in j_lower or "elbow" in j_lower or "wrist" in j_lower or "hand" in j_lower:
+                if joint and joint not in selected_joints:
+                    selected_joints.append(joint)
+
+    if "left" in text_lower and not any(k in text_lower for k in ("right", "both")):
+        selected_joints = [j for j in selected_joints if "left" in j.lower()]
+    elif "right" in text_lower and not any(k in text_lower for k in ("left", "both")):
+        selected_joints = [j for j in selected_joints if "right" in j.lower()]
 
     return {
         "allow_foot": allow_foot,
@@ -334,10 +377,47 @@ def parse_kinematic_intent(
         "selected_joints": selected_joints,
     }
 
+def generate_agent_task_prompt(
+    role: str,
+    target_bones: List[str],
+    target_frames: List[int],
+    findings: Optional[List[Dict[str, Any]]] = None,
+    feedback: Optional[str] = None,
+) -> str:
+    f_start = target_frames[0] if target_frames else 0
+    f_end = target_frames[1] if len(target_frames) > 1 else 100
+    bones_str = ", ".join(target_bones) if target_bones else "unspecified"
+    details = []
+    if findings:
+        for f in findings:
+            a_type = f.get("anomaly_type", "DEFECT")
+            ev = f.get("evidence", {})
+            expl = f.get("explanation", "")
+            details.append(f"- Anomaly: {a_type} on {f.get('affected_joint')} [frames {f.get('frame_start', f_start)}..{f.get('frame_end', f_end)}]. Evidence: {ev}. Description: {expl}")
+    details_str = "\n".join(details) if details else f"- Target defect on {bones_str} across frames [{f_start}..{f_end}]."
+
+    feedback_section = ""
+    if feedback:
+        feedback_section = f"\nPrevious attempt feedback (MUST FIX):\n{feedback}\n"
+
+    return (
+        f"You are a specialized motion capture repair agent: {role}.\n"
+        f"Target bones: {bones_str}.\n"
+        f"Target frames: [{f_start}, {f_end}].\n"
+        f"Defect context:\n{details_str}\n"
+        f"{feedback_section}"
+        f"Repair instructions:\n"
+        f"Follow boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
+        f"Eliminate the target anomaly within the assigned frame window while preserving bone segment lengths and floor contact.\n"
+        f"Constraint: You must actively modify the target channel fcurves. Returning an unchanged animation or identity script is strictly prohibited and will be rejected.\n"
+        f"Output raw python code enclosed in ```python ``` tags."
+    )
+
 def _deterministic_synthesis(
     prompt_lower: str,
     norm_findings: List[Dict[str, Any]],
     metadata: Optional[Any] = None,
+    selected_joints: Optional[List[str]] = None,
 ) -> List[AgentSpecification]:
     roster: List[AgentSpecification] = []
     total_frames = 100
@@ -347,11 +427,26 @@ def _deterministic_synthesis(
         elif isinstance(metadata, dict) and "frame_count" in metadata:
             total_frames = metadata["frame_count"]
 
+    if selected_joints:
+        selected_set = {j.lower() for j in selected_joints}
+        norm_findings = [
+            f for f in norm_findings
+            if any(sj in str(f.get("affected_joint", "")).lower() or str(f.get("affected_joint", "")).lower() in sj for sj in selected_set)
+        ]
+
     intent = parse_kinematic_intent(prompt_lower, norm_findings)
     allow_foot = intent["allow_foot"]
     allow_jitter = intent["allow_jitter"]
     allow_root = intent["allow_root"]
     allow_arm = intent["allow_arm"]
+
+    if selected_joints:
+        selected_set = {j.lower() for j in selected_joints}
+        allow_foot = any("foot" in j or "toe" in j or "ankle" in j for j in selected_set)
+        allow_jitter = any("spine" in j or "neck" in j for j in selected_set)
+        allow_root = any("hips" in j or "root" in j for j in selected_set)
+        allow_arm = any("arm" in j or "shoulder" in j or "elbow" in j or "wrist" in j or "hand" in j for j in selected_set)
+
     prompt_frame_start = intent["frame_start"]
     prompt_frame_end = intent["frame_end"]
 
@@ -375,131 +470,154 @@ def _deterministic_synthesis(
         or "root" in str(f.get("affected_joint", "")).lower()
     ]
 
-    has_foot_prompt = any(k in prompt_lower for k in ("foot", "feet", "slide", "sliding", "planted", "pin", "ground"))
+    has_foot_prompt = any(k in prompt_lower for k in ("foot", "feet", "slide", "sliding", "planted", "ground", "pinning", "pinned")) or bool(re.search(r"\bpin\b", prompt_lower))
     has_jitter_prompt = any(k in prompt_lower for k in ("jitter", "smooth", "spine", "torso", "catmull", "filter"))
     has_root_prompt = any(k in prompt_lower for k in ("root", "discontinuity", "drift", "teleport", "origin"))
     has_arm_prompt = any(k in prompt_lower for k in ("arm", "shoulder", "hand", "elbow", "wrist"))
 
     if allow_foot and (foot_findings or (has_foot_prompt and not jitter_findings and not root_findings)):
         joints = sorted(list(set(f.get("affected_joint") for f in foot_findings if f.get("affected_joint"))))
-        if not joints:
+        if selected_joints:
+            joints = [j for j in joints if any(sj.lower() in j.lower() or j.lower() in sj.lower() for sj in selected_joints)]
+            if not joints:
+                joints = [j for j in selected_joints if any(k in j.lower() for k in ("foot", "toe", "ankle"))]
+        if not joints and not selected_joints:
             joints = ["LeftFoot", "RightFoot"] if "both" in prompt_lower else (["RightFoot"] if "right" in prompt_lower else ["LeftFoot"])
-        min_f = prompt_frame_start if prompt_frame_start is not None else min((f.get("frame_start", 0) for f in foot_findings), default=0)
-        max_f = prompt_frame_end if prompt_frame_end is not None else max((f.get("frame_end", total_frames) for f in foot_findings), default=total_frames)
-        f_ids = [f.get("finding_id") for f in foot_findings if f.get("finding_id")]
-        instruction = (
-            f"You are a specialized Blender developer for foot ground contact pinning: {', '.join(joints)}.\n"
-            f"Target frames: [{min_f}, {max_f}].\n"
-            f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
-            "Apply inverse kinematics (IK) or floor level constraints to prevent sliding on ground plane.\n"
-            "Call query_clickhouse_rag to inspect historical contact repairs.\n"
-            "Output raw python code enclosed in ```python ``` tags."
-        )
-        roster.append(
-            AgentSpecification(
-                agent_id=f"agent-foot-{uuid.uuid4().hex[:6]}",
-                role=f"{'/'.join(joints)} Ground Contact & Anti-Slide Specialist",
-                assigned_finding_ids=f_ids,
-                assigned_joints=joints,
-                target_bones=joints,
-                target_frames=[min_f, max_f],
-                tools=["query_clickhouse_rag"],
-                status="SPAWNED",
-                system_instruction=instruction,
+        if joints:
+            min_f = prompt_frame_start if prompt_frame_start is not None else min((f.get("frame_start", 0) for f in foot_findings), default=0)
+            max_f = prompt_frame_end if prompt_frame_end is not None else max((f.get("frame_end", total_frames) for f in foot_findings), default=total_frames)
+            f_ids = [f.get("finding_id") for f in foot_findings if f.get("finding_id")]
+            instruction = (
+                f"You are a specialized Blender developer for foot ground contact pinning: {', '.join(joints)}.\n"
+                f"Target frames: [{min_f}, {max_f}].\n"
+                f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
+                "Apply inverse kinematics (IK) or floor level constraints to prevent sliding on ground plane.\n"
+                "Call query_clickhouse_rag to inspect historical contact repairs.\n"
+                "Output raw python code enclosed in ```python ``` tags."
             )
-        )
+            roster.append(
+                AgentSpecification(
+                    agent_id=f"agent-foot-{uuid.uuid4().hex[:6]}",
+                    role=f"{'/'.join(joints)} Ground Contact & Anti-Slide Specialist",
+                    assigned_finding_ids=f_ids,
+                    assigned_joints=joints,
+                    target_bones=joints,
+                    target_frames=[min_f, max_f],
+                    tools=["query_clickhouse_rag"],
+                    status="SPAWNED",
+                    system_instruction=instruction,
+                )
+            )
 
     if allow_jitter and (jitter_findings or (has_jitter_prompt and not foot_findings and not root_findings)):
         joints = sorted(list(set(f.get("affected_joint") for f in jitter_findings if f.get("affected_joint"))))
-        if not joints:
+        if selected_joints:
+            joints = [j for j in joints if any(sj.lower() in j.lower() or j.lower() in sj.lower() for sj in selected_joints)]
+            if not joints:
+                joints = [j for j in selected_joints if any(k in j.lower() for k in ("spine", "neck"))]
+        if not joints and not selected_joints:
             joints = ["Spine", "Spine1"] if "torso" in prompt_lower else ["Spine"]
-        min_f = prompt_frame_start if prompt_frame_start is not None else min((f.get("frame_start", 0) for f in jitter_findings), default=0)
-        max_f = prompt_frame_end if prompt_frame_end is not None else max((f.get("frame_end", total_frames) for f in jitter_findings), default=total_frames)
-        f_ids = [f.get("finding_id") for f in jitter_findings if f.get("finding_id")]
-        instruction = (
-            f"You are a specialized Blender developer for kinematic trajectory smoothing: {', '.join(joints)}.\n"
-            f"Target frames: [{min_f}, {max_f}].\n"
-            f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
-            "Modify fcurve keyframe points directly without bpy.ops UI calls using Gaussian or Catmull-Rom filtering.\n"
-            "Call query_clickhouse_rag to retrieve optimal smoothing parameters.\n"
-            "Output raw python code enclosed in ```python ``` tags."
-        )
-        roster.append(
-            AgentSpecification(
-                agent_id=f"agent-jitter-{uuid.uuid4().hex[:6]}",
-                role=f"{'/'.join(joints)} Kinematic Jitter & Trajectory Smoother",
-                assigned_finding_ids=f_ids,
-                assigned_joints=joints,
-                target_bones=joints,
-                target_frames=[min_f, max_f],
-                tools=["query_clickhouse_rag"],
-                status="SPAWNED",
-                system_instruction=instruction,
+        if joints:
+            min_f = prompt_frame_start if prompt_frame_start is not None else min((f.get("frame_start", 0) for f in jitter_findings), default=0)
+            max_f = prompt_frame_end if prompt_frame_end is not None else max((f.get("frame_end", total_frames) for f in jitter_findings), default=total_frames)
+            f_ids = [f.get("finding_id") for f in jitter_findings if f.get("finding_id")]
+            instruction = (
+                f"You are a specialized Blender developer for kinematic trajectory smoothing: {', '.join(joints)}.\n"
+                f"Target frames: [{min_f}, {max_f}].\n"
+                f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
+                "Modify fcurve keyframe points directly without bpy.ops UI calls using Gaussian or Catmull-Rom filtering.\n"
+                "Call query_clickhouse_rag to retrieve optimal smoothing parameters.\n"
+                "Output raw python code enclosed in ```python ``` tags."
             )
-        )
+            roster.append(
+                AgentSpecification(
+                    agent_id=f"agent-jitter-{uuid.uuid4().hex[:6]}",
+                    role=f"{'/'.join(joints)} Kinematic Jitter & Trajectory Smoother",
+                    assigned_finding_ids=f_ids,
+                    assigned_joints=joints,
+                    target_bones=joints,
+                    target_frames=[min_f, max_f],
+                    tools=["query_clickhouse_rag"],
+                    status="SPAWNED",
+                    system_instruction=instruction,
+                )
+            )
 
     if allow_root and (root_findings or (has_root_prompt and not foot_findings and not jitter_findings)):
         joints = sorted(list(set(f.get("affected_joint") for f in root_findings if f.get("affected_joint"))))
-        if not joints:
+        if selected_joints:
+            joints = [j for j in joints if any(sj.lower() in j.lower() or j.lower() in sj.lower() for sj in selected_joints)]
+            if not joints:
+                joints = [j for j in selected_joints if any(k in j.lower() for k in ("hips", "root"))]
+        if not joints and not selected_joints:
             joints = ["Hips"]
-        min_f = prompt_frame_start if prompt_frame_start is not None else min((f.get("frame_start", 0) for f in root_findings), default=0)
-        max_f = prompt_frame_end if prompt_frame_end is not None else max((f.get("frame_end", total_frames) for f in root_findings), default=total_frames)
-        f_ids = [f.get("finding_id") for f in root_findings if f.get("finding_id")]
-        instruction = (
-            f"You are a specialized Blender developer for root motion stabilization: {', '.join(joints)}.\n"
-            f"Target frames: [{min_f}, {max_f}].\n"
-            f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
-            "Eliminate translation jumps and reconcile delta offsets across discontinuous frames.\n"
-            "Call query_clickhouse_rag to inspect root motion continuity patterns.\n"
-            "Output raw python code enclosed in ```python ``` tags."
-        )
-        roster.append(
-            AgentSpecification(
-                agent_id=f"agent-root-{uuid.uuid4().hex[:6]}",
-                role=f"{'/'.join(joints)} Root Motion & Trajectory Stabilizer",
-                assigned_finding_ids=f_ids,
-                assigned_joints=joints,
-                target_bones=joints,
-                target_frames=[min_f, max_f],
-                tools=["query_clickhouse_rag"],
-                status="SPAWNED",
-                system_instruction=instruction,
+        if joints:
+            min_f = prompt_frame_start if prompt_frame_start is not None else min((f.get("frame_start", 0) for f in root_findings), default=0)
+            max_f = prompt_frame_end if prompt_frame_end is not None else max((f.get("frame_end", total_frames) for f in root_findings), default=total_frames)
+            f_ids = [f.get("finding_id") for f in root_findings if f.get("finding_id")]
+            instruction = (
+                f"You are a specialized Blender developer for root motion stabilization: {', '.join(joints)}.\n"
+                f"Target frames: [{min_f}, {max_f}].\n"
+                f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
+                "Eliminate translation jumps and reconcile delta offsets across discontinuous frames.\n"
+                "Call query_clickhouse_rag to inspect root motion continuity patterns.\n"
+                "Output raw python code enclosed in ```python ``` tags."
             )
-        )
+            roster.append(
+                AgentSpecification(
+                    agent_id=f"agent-root-{uuid.uuid4().hex[:6]}",
+                    role=f"{'/'.join(joints)} Root Motion & Trajectory Stabilizer",
+                    assigned_finding_ids=f_ids,
+                    assigned_joints=joints,
+                    target_bones=joints,
+                    target_frames=[min_f, max_f],
+                    tools=["query_clickhouse_rag"],
+                    status="SPAWNED",
+                    system_instruction=instruction,
+                )
+            )
 
-    if allow_arm and has_arm_prompt:
-        arm_joints = ["LeftArm", "LeftForeArm"] if "left" in prompt_lower else (["RightArm", "RightForeArm"] if "right" in prompt_lower else ["LeftArm", "RightArm"])
-        min_f = prompt_frame_start if prompt_frame_start is not None else 0
-        max_f = prompt_frame_end if prompt_frame_end is not None else total_frames
-        instruction = (
-            f"You are a specialized Blender developer for arm and upper limb kinematics: {', '.join(arm_joints)}.\n"
-            f"Target frames: [{min_f}, {max_f}].\n"
-            f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
-            "Adjust upper limb rotation curves and resolve joint angle anomalies.\n"
-            "Output raw python code enclosed in ```python ``` tags."
-        )
-        roster.append(
-            AgentSpecification(
-                agent_id=f"agent-arm-{uuid.uuid4().hex[:6]}",
-                role=f"{'/'.join(arm_joints)} Upper Limb Kinematics Specialist",
-                assigned_finding_ids=[],
-                assigned_joints=arm_joints,
-                target_bones=arm_joints,
-                target_frames=[min_f, max_f],
-                tools=["query_clickhouse_rag"],
-                status="SPAWNED",
-                system_instruction=instruction,
+    if allow_arm and (has_arm_prompt or (selected_joints and any(any(k in j.lower() for k in ("arm", "shoulder", "elbow", "wrist", "hand")) for j in selected_joints))):
+        if selected_joints:
+            arm_joints = [j for j in selected_joints if any(k in j.lower() for k in ("arm", "shoulder", "elbow", "wrist", "hand"))]
+        else:
+            arm_joints = ["LeftArm", "LeftForeArm"] if "left" in prompt_lower else (["RightArm", "RightForeArm"] if "right" in prompt_lower else ["LeftArm", "RightArm"])
+        if arm_joints:
+            min_f = prompt_frame_start if prompt_frame_start is not None else 0
+            max_f = prompt_frame_end if prompt_frame_end is not None else total_frames
+            instruction = (
+                f"You are a specialized Blender developer for arm and upper limb kinematics: {', '.join(arm_joints)}.\n"
+                f"Target frames: [{min_f}, {max_f}].\n"
+                f"Follow the boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
+                "Adjust upper limb rotation curves and resolve joint angle anomalies.\n"
+                "Output raw python code enclosed in ```python ``` tags."
             )
-        )
+            roster.append(
+                AgentSpecification(
+                    agent_id=f"agent-arm-{uuid.uuid4().hex[:6]}",
+                    role=f"{'/'.join(arm_joints)} Upper Limb Kinematics Specialist",
+                    assigned_finding_ids=[],
+                    assigned_joints=arm_joints,
+                    target_bones=arm_joints,
+                    target_frames=[min_f, max_f],
+                    tools=["query_clickhouse_rag"],
+                    status="SPAWNED",
+                    system_instruction=instruction,
+                )
+            )
 
     if not roster:
         other_findings = [f for f in norm_findings if f.get("affected_joint")]
-        if not allow_foot:
-            other_findings = [f for f in other_findings if "foot" not in str(f.get("affected_joint", "")).lower() and "toe" not in str(f.get("affected_joint", "")).lower() and "ankle" not in str(f.get("affected_joint", "")).lower()]
-        if not allow_jitter:
-            other_findings = [f for f in other_findings if "spine" not in str(f.get("affected_joint", "")).lower() and "neck" not in str(f.get("affected_joint", "")).lower()]
-        if not allow_root:
-            other_findings = [f for f in other_findings if "hips" not in str(f.get("affected_joint", "")).lower() and "root" not in str(f.get("affected_joint", "")).lower()]
+        if selected_joints:
+            selected_set = {j.lower() for j in selected_joints}
+            other_findings = [f for f in other_findings if any(sj in str(f.get("affected_joint", "")).lower() or str(f.get("affected_joint", "")).lower() in sj for sj in selected_set)]
+        else:
+            if not allow_foot:
+                other_findings = [f for f in other_findings if "foot" not in str(f.get("affected_joint", "")).lower() and "toe" not in str(f.get("affected_joint", "")).lower() and "ankle" not in str(f.get("affected_joint", "")).lower()]
+            if not allow_jitter:
+                other_findings = [f for f in other_findings if "spine" not in str(f.get("affected_joint", "")).lower() and "neck" not in str(f.get("affected_joint", "")).lower()]
+            if not allow_root:
+                other_findings = [f for f in other_findings if "hips" not in str(f.get("affected_joint", "")).lower() and "root" not in str(f.get("affected_joint", "")).lower()]
 
         if other_findings:
             by_joint: Dict[str, List[Dict[str, Any]]] = {}
@@ -532,17 +650,26 @@ def _deterministic_synthesis(
 
     return roster
 
+
 def synthesize_agent_roster(
     prompt: Optional[str] = None,
     findings: Optional[List[Any]] = None,
     metadata: Optional[Any] = None,
+    selected_joints: Optional[List[str]] = None,
 ) -> List[AgentSpecification]:
     norm_findings = _normalize_findings(findings or [])
     prompt_str = (prompt or "").strip()
     prompt_lower = prompt_str.lower()
 
+    if selected_joints:
+        selected_set = {j.lower() for j in selected_joints}
+        norm_findings = [
+            f for f in norm_findings
+            if any(sj in str(f.get("affected_joint", "")).lower() or str(f.get("affected_joint", "")).lower() in sj for sj in selected_set)
+        ]
+
     if os.environ.get("TESTING") == "1":
-        return _deterministic_synthesis(prompt_lower, norm_findings, metadata)
+        return _deterministic_synthesis(prompt_lower, norm_findings, metadata, selected_joints=selected_joints)
 
     try:
         synth_agent = Agent(
@@ -568,6 +695,7 @@ def synthesize_agent_roster(
         context_payload = json.dumps({
             "user_prompt": prompt_str,
             "findings": findings_summary,
+            "selected_joints": selected_joints or [],
         })
         try:
             loop = asyncio.get_running_loop()
@@ -603,7 +731,7 @@ def synthesize_agent_roster(
     except Exception as e:
         logger.warning(f"ADK dynamic synthesis fallback engaged: {e}")
 
-    return _deterministic_synthesis(prompt_lower, norm_findings, metadata)
+    return _deterministic_synthesis(prompt_lower, norm_findings, metadata, selected_joints=selected_joints)
 
 def instantiate_dynamic_agent(agent_spec: AgentSpecification) -> Agent:
     tools = []
@@ -615,13 +743,10 @@ def instantiate_dynamic_agent(agent_spec: AgentSpecification) -> Agent:
         tools.append(list_clickhouse_tables)
 
     clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", agent_spec.role.lower())[:38].strip("_") or "dynamic_agent"
-    instruction = agent_spec.system_instruction or (
-        f"You are a specialized motion capture repair agent: {agent_spec.role}.\n"
-        f"Target bones: {', '.join(agent_spec.target_bones)}.\n"
-        f"Target frames: {agent_spec.target_frames}.\n"
-        f"Follow boilerplate pattern:\n{BLENDER_BOILERPLATE.replace('{', '<').replace('}', '>')}\n"
-        "Call query_clickhouse_rag or run_select_query to check for historical fixes from ClickHouse.\n"
-        "Your only output should be raw python code enclosed in ```python ``` tags."
+    instruction = agent_spec.system_instruction or generate_agent_task_prompt(
+        role=agent_spec.role,
+        target_bones=agent_spec.target_bones or agent_spec.assigned_joints or [],
+        target_frames=agent_spec.target_frames or [0, 100],
     )
     return Agent(
         name=clean_name,
@@ -838,6 +963,14 @@ def build_edit_mask(
             joint = f_dict.get("affected_joint")
             f_start = max(0, int(f_dict.get("frame_start", 0)))
             f_end = min(total_frames - 1, int(f_dict.get("frame_end", total_frames - 1)))
+            a_type = str(f_dict.get("anomaly_type", "")).upper()
+            if ("ROOT" in a_type or "DISCONTINUITY" in a_type or "JUMP" in a_type) and joint == parsed.root_node.name:
+                t_jump = max(1, f_start)
+                t_post = min(total_frames - 1, f_end + 1)
+                pos_indices = [idx for name, idx in j_map[joint].items() if "position" in name.lower()] if joint in j_map else []
+                dist = sum((parsed.motion[t_post][k] - parsed.motion[t_jump - 1][k]) ** 2 for k in pos_indices) ** 0.5 if pos_indices else 999.0
+                if dist >= 15.0 or f_end >= total_frames - 1:
+                    f_end = total_frames - 1
             if joint and joint in j_map:
                 for ch_idx in j_map[joint].values():
                     for t in range(f_start, f_end + 1):
@@ -1113,6 +1246,8 @@ def validate_jitter_repair(
     orig_envelope_max = 0.0
     rep_envelope_max = 0.0
 
+    rot_indices = [idx for name, idx in j_map[joint_name].items() if "rotation" in name.lower()]
+
     for ch_idx in ch_indices:
         orig_v = [orig_parsed.motion[t][ch_idx] for t in range(f_start, f_end + 1)]
         rep_v = [rep_parsed.motion[t][ch_idx] for t in range(f_start, f_end + 1)]
@@ -1126,8 +1261,9 @@ def validate_jitter_repair(
         total_orig_reversals += orig_reversals
         total_rep_reversals += rep_reversals
 
-        orig_envelope_max = max(orig_envelope_max, max((abs(d) for d in orig_diffs), default=0.0))
-        rep_envelope_max = max(rep_envelope_max, max((abs(d) for d in rep_diffs), default=0.0))
+        if ch_idx in rot_indices:
+            orig_envelope_max = max(orig_envelope_max, max((abs(d) for d in orig_diffs), default=0.0))
+            rep_envelope_max = max(rep_envelope_max, max((abs(d) for d in rep_diffs), default=0.0))
 
     if total_orig_reversals >= 3 and total_rep_reversals >= total_orig_reversals:
         return False, f"Jitter validation rejected: high-frequency reversal oscillation on {joint_name} was not reduced (orig={total_orig_reversals}, rep={total_rep_reversals})"
@@ -1257,7 +1393,8 @@ def validate_root_jump_repair(
         return False, f"Root jump validation rejected: jump discontinuity was not resolved (orig={orig_step:.2f}, rep={rep_step:.2f})"
 
     max_path_drift = 0.0
-    for t in range(t_jump + 1, min(fc - 1, t_jump + 20)):
+    check_start = max(t_jump + 1, int(frame_end) + 1)
+    for t in range(check_start, min(fc - 1, check_start + 20)):
         for k in pos_indices:
             orig_d = orig_parsed.motion[t + 1][k] - orig_parsed.motion[t][k]
             rep_d = rep_parsed.motion[t + 1][k] - rep_parsed.motion[t][k]
@@ -1313,28 +1450,37 @@ def validate_pose_violation_repair(
     return True, ""
 
 def validate_repair_quality(
-    original_bvh_path: str,
-    repaired_bvh_path: str,
+    original_bvh_path: Union[str, ParsedBVH],
+    repaired_bvh_path: Union[str, ParsedBVH],
     roster: Optional[List[AgentSpecification]] = None,
     findings: Optional[List[Any]] = None,
     authorized_mask: Optional[Set[Tuple[int, int]]] = None,
 ) -> Tuple[bool, List[str]]:
     reasons: List[str] = []
 
-    if not os.path.exists(original_bvh_path) or not os.path.exists(repaired_bvh_path):
-        if os.environ.get("TESTING") == "1":
-            return True, []
-        return False, ["BVH file does not exist on disk"]
+    if isinstance(original_bvh_path, ParsedBVH):
+        orig_parsed = original_bvh_path
+    else:
+        if not os.path.exists(original_bvh_path):
+            if os.environ.get("TESTING") == "1":
+                return True, []
+            return False, ["BVH file does not exist on disk"]
+        try:
+            orig_parsed = parse_bvh_file(original_bvh_path)
+        except Exception as e:
+            return False, [f"Failed to parse original BVH: {e}"]
 
-    try:
-        orig_parsed = parse_bvh_file(original_bvh_path)
-    except Exception as e:
-        return False, [f"Failed to parse original BVH: {e}"]
-
-    try:
-        rep_parsed = parse_bvh_file(repaired_bvh_path)
-    except Exception as e:
-        return False, [f"Failed to parse repaired BVH: {e}"]
+    if isinstance(repaired_bvh_path, ParsedBVH):
+        rep_parsed = repaired_bvh_path
+    else:
+        if not os.path.exists(repaired_bvh_path):
+            if os.environ.get("TESTING") == "1":
+                return True, []
+            return False, ["BVH file does not exist on disk"]
+        try:
+            rep_parsed = parse_bvh_file(repaired_bvh_path)
+        except Exception as e:
+            return False, [f"Failed to parse repaired BVH: {e}"]
 
     orig_rep = build_shared_motion_representation(orig_parsed)
     rep_rep = build_shared_motion_representation(rep_parsed)
@@ -1500,11 +1646,20 @@ def compute_deterministic_repairs(
                 matched = True
                 pos_indices = [idx for name, idx in ch_dict.items() if "position" in name.lower()]
                 t_jump = max(1, f_start)
-                for k in pos_indices:
-                    jump_delta = parsed.motion[t_jump][k] - parsed.motion[t_jump - 1][k]
-                    if abs(jump_delta) > 5.0:
-                        for t in range(t_jump, fc):
-                            patches[(t, k)] = parsed.motion[t][k] - jump_delta
+                t_post = min(fc - 1, f_end + 1)
+                dist = sum((parsed.motion[t_post][k] - parsed.motion[t_jump - 1][k]) ** 2 for k in pos_indices) ** 0.5
+                if dist < 15.0 and f_end < fc - 1:
+                    span = max(1, t_post - (t_jump - 1))
+                    for t in range(t_jump, f_end + 1):
+                        alpha = (t - (t_jump - 1)) / span
+                        for k in pos_indices:
+                            patches[(t, k)] = parsed.motion[t_jump - 1][k] * (1.0 - alpha) + parsed.motion[t_post][k] * alpha
+                else:
+                    for k in pos_indices:
+                        jump_delta = parsed.motion[t_jump][k] - parsed.motion[t_jump - 1][k]
+                        if abs(jump_delta) > 5.0:
+                            for t in range(t_jump, fc):
+                                patches[(t, k)] = parsed.motion[t][k] - jump_delta
 
         elif "BIOMECHANICAL" in a_type or "LIMIT" in a_type or "VIOLATION" in a_type or "HYPEREXTENSION" in a_type:
             matched = True
@@ -1607,6 +1762,309 @@ def compute_deterministic_repairs(
 
     return patches
 
+def build_finding_task_context(
+    finding: Dict[str, Any],
+    parsed_bvh: ParsedBVH,
+    retry_feedback: Optional[str] = None,
+) -> Dict[str, Any]:
+    j_name = str(finding.get("affected_joint") or "")
+    f_start = int(finding.get("frame_start", 0))
+    f_end = int(finding.get("frame_end", parsed_bvh.metadata.frame_count - 1))
+    a_type = str(finding.get("anomaly_type", "UNKNOWN"))
+    ev = finding.get("evidence", {})
+    expl = finding.get("explanation", "")
+    j_map = build_joint_channel_map(parsed_bvh)
+    ch_dict = j_map.get(j_name, {})
+    return {
+        "finding_id": finding.get("finding_id", str(uuid.uuid4())),
+        "joint": j_name,
+        "anomaly_type": a_type,
+        "frame_start": f_start,
+        "frame_end": f_end,
+        "evidence": ev,
+        "explanation": expl,
+        "channels": list(ch_dict.keys()),
+        "retry_feedback": retry_feedback,
+        "objective": f"Repair {a_type} on joint {j_name} across frames [{f_start}..{f_end}] cleanly.",
+    }
+
+def generate_finding_repair_candidate(
+    parsed_bvh: ParsedBVH,
+    finding: Dict[str, Any],
+    task_context: Dict[str, Any],
+    attempt: int = 1,
+) -> Dict[Tuple[int, int], float]:
+    patches = compute_deterministic_repairs(parsed_bvh, findings=[finding])
+    if not patches and attempt > 1:
+        j_name = task_context.get("joint", "")
+        f_start = task_context.get("frame_start", 0)
+        f_end = task_context.get("frame_end", parsed_bvh.metadata.frame_count - 1)
+        j_map = build_joint_channel_map(parsed_bvh)
+        ch_dict = j_map.get(j_name, {})
+        fc = parsed_bvh.metadata.frame_count
+        for ch_idx in ch_dict.values():
+            vals = [parsed_bvh.motion[t][ch_idx] for t in range(fc)]
+            for t in range(f_start, f_end + 1):
+                if 0 < t < fc - 1:
+                    smoothed = 0.25 * vals[t - 1] + 0.5 * vals[t] + 0.25 * vals[t + 1]
+                    patches[(t, ch_idx)] = smoothed
+    return patches
+
+def validate_candidate_authorized_changes(
+    candidate_patches: Dict[Tuple[int, int], float],
+    authorized_mask: Set[Tuple[int, int]],
+    base_motion: List[List[float]],
+) -> Tuple[bool, str]:
+    if not candidate_patches:
+        return False, "Candidate returned no channel modifications"
+    unauthorized = set(candidate_patches.keys()) - authorized_mask
+    if unauthorized:
+        return False, f"Candidate modified {len(unauthorized)} unauthorized channels outside approved scope"
+    has_delta = False
+    for (t, ch_idx), val in candidate_patches.items():
+        if abs(val - base_motion[t][ch_idx]) > 1e-4:
+            has_delta = True
+            break
+    if not has_delta:
+        return False, "Candidate values are identical to pre-repair motion (unmodified)"
+    return True, ""
+
+def validate_finding_quality(
+    orig_parsed: ParsedBVH,
+    candidate_parsed: ParsedBVH,
+    finding: Dict[str, Any],
+    authorized_mask: Set[Tuple[int, int]],
+) -> Tuple[bool, List[str]]:
+    reasons: List[str] = []
+    orig_rep = build_shared_motion_representation(orig_parsed)
+    cand_rep = build_shared_motion_representation(candidate_parsed)
+
+    inv_passed, inv_errs = check_repair_invariants(orig_parsed, candidate_parsed, orig_rep=orig_rep, rep_rep=cand_rep)
+    if not inv_passed:
+        reasons.extend(inv_errs)
+
+    mask_passed, mask_errs = validate_strict_edit_mask(orig_parsed, candidate_parsed, authorized_mask)
+    if not mask_passed:
+        reasons.extend(mask_errs)
+
+    j_name = finding.get("affected_joint")
+    f_start = finding.get("frame_start", 0)
+    f_end = finding.get("frame_end", orig_parsed.metadata.frame_count - 1)
+    a_type = str(finding.get("anomaly_type", "")).upper()
+
+    if "POP" in a_type or "SWAP" in a_type:
+        ok, err = validate_pop_repair(orig_parsed, candidate_parsed, orig_rep, cand_rep, j_name, f_start, f_end)
+        if not ok:
+            reasons.append(err)
+    elif "JITTER" in a_type:
+        ok, err = validate_jitter_repair(orig_parsed, candidate_parsed, j_name, f_start, f_end)
+        if not ok:
+            reasons.append(err)
+    elif "SLID" in a_type or "FOOT" in a_type:
+        ok, err = validate_foot_slide_repair(orig_parsed, candidate_parsed, orig_rep, cand_rep, j_name, f_start, f_end)
+        if not ok:
+            reasons.append(err)
+    elif "FREEZE" in a_type or "SENSOR" in a_type or "DROPOUT" in a_type:
+        ok, err = validate_freeze_repair(orig_parsed, candidate_parsed, j_name, f_start, f_end)
+        if not ok:
+            reasons.append(err)
+    elif "ROOT" in a_type or "DISCONTINUITY" in a_type or "JUMP" in a_type:
+        ok, err = validate_root_jump_repair(orig_parsed, candidate_parsed, j_name, f_start, f_end)
+        if not ok:
+            reasons.append(err)
+    elif "BIOMECHANICAL" in a_type or "LIMIT" in a_type or "VIOLATION" in a_type:
+        ok, err = validate_pose_violation_repair(orig_parsed, candidate_parsed, j_name, f_start, f_end)
+        if not ok:
+            reasons.append(err)
+
+    if reasons:
+        return False, reasons
+    return True, []
+
+def execute_progressive_finding_repair(
+    input_bvh_path: str,
+    output_bvh_path: str,
+    approved_findings: Optional[List[Any]] = None,
+    roster: Optional[List[AgentSpecification]] = None,
+    max_retries: int = 3,
+    event_callback: Optional[Callable[[Dict[str, Any]], Any]] = None,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    if not os.path.exists(input_bvh_path):
+        raise FileNotFoundError(f"Input BVH does not exist: {input_bvh_path}")
+
+    if os.path.abspath(input_bvh_path) == os.path.abspath(output_bvh_path):
+        raise ValueError("Safe repair requires separate asset output; in-place modification prohibited.")
+
+    base_parsed = parse_bvh_file(input_bvh_path)
+    fc = base_parsed.metadata.frame_count
+    working_motion = [list(row) for row in base_parsed.motion]
+    working_parsed = copy.deepcopy(base_parsed)
+    working_parsed.motion = working_motion
+
+    accumulated_patches: Dict[Tuple[int, int], float] = {}
+    all_authorized_mask: Set[Tuple[int, int]] = set()
+    fixed_findings: List[Dict[str, Any]] = []
+    unresolved_findings: List[Dict[str, Any]] = []
+    retry_stats: Dict[str, int] = {}
+
+    norm_findings = _normalize_findings(approved_findings or [])
+    if not norm_findings and roster:
+        for spec in roster:
+            for b in (spec.target_bones or spec.assigned_joints or []):
+                tf = spec.target_frames or [0, fc - 1]
+                norm_findings.append({
+                    "finding_id": f"finding-{uuid.uuid4().hex[:6]}",
+                    "affected_joint": b,
+                    "frame_start": tf[0],
+                    "frame_end": tf[1],
+                    "anomaly_type": "ROTATION_JITTER" if "JITTER" in spec.role.upper() else ("PLANTED_FOOT_SLIDING" if "SLID" in spec.role.upper() or "FOOT" in spec.role.upper() else "ROOT_DISCONTINUITY"),
+                    "severity": "HIGH",
+                })
+
+    for f in norm_findings:
+        f_id = str(f.get("finding_id") or uuid.uuid4().hex[:8])
+        j_name = str(f.get("affected_joint") or "")
+        f_start = int(f.get("frame_start", 0))
+        f_end = int(f.get("frame_end", fc - 1))
+        a_type = str(f.get("anomaly_type", "UNKNOWN"))
+
+        finding_mask = build_edit_mask(working_parsed, findings=[f])
+        finding_fixed = False
+        last_feedback = None
+
+        for attempt in range(1, max_retries + 1):
+            retry_stats[f_id] = attempt
+            if event_callback and attempt > 1:
+                event_callback({
+                    "event": "FINDING_RETRY",
+                    "finding_id": f_id,
+                    "joint": j_name,
+                    "attempt": attempt,
+                    "reason": last_feedback,
+                })
+
+            task_ctx = build_finding_task_context(f, working_parsed, retry_feedback=last_feedback)
+            cand_patches = generate_finding_repair_candidate(working_parsed, f, task_ctx, attempt=attempt)
+
+            has_changes, change_err = validate_candidate_authorized_changes(cand_patches, finding_mask, working_parsed.motion)
+            if not has_changes:
+                last_feedback = f"Attempt {attempt}: Candidate changed no authorized values ({change_err}). Defect on {j_name} [{f_start}..{f_end}] was untouched."
+                continue
+
+            cand_parsed = copy.deepcopy(working_parsed)
+            for (t, ch_idx), val in cand_patches.items():
+                cand_parsed.motion[t][ch_idx] = val
+
+            test_mask = all_authorized_mask | finding_mask
+            gate_passed, gate_errs = validate_finding_quality(base_parsed, cand_parsed, f, test_mask)
+            if not gate_passed:
+                last_feedback = f"Attempt {attempt}: Quality gate rejected repair: {'; '.join(gate_errs)}"
+                continue
+
+            for (t, ch_idx), val in cand_patches.items():
+                working_motion[t][ch_idx] = val
+            accumulated_patches.update(cand_patches)
+            all_authorized_mask.update(finding_mask)
+            fixed_findings.append({
+                "finding_id": f_id,
+                "joint": j_name,
+                "anomaly_type": a_type,
+                "frame_start": f_start,
+                "frame_end": f_end,
+                "attempts": attempt,
+                "description": f"Successfully fixed {a_type} on {j_name} (frames {f_start}-{f_end}).",
+            })
+            finding_fixed = True
+            if event_callback:
+                event_callback({
+                    "event": "FINDING_FIXED",
+                    "finding_id": f_id,
+                    "joint": j_name,
+                    "anomaly_type": a_type,
+                    "attempts": attempt,
+                })
+            break
+
+        if not finding_fixed:
+            unresolved_findings.append({
+                "finding_id": f_id,
+                "joint": j_name,
+                "anomaly_type": a_type,
+                "frame_start": f_start,
+                "frame_end": f_end,
+                "attempts": max_retries,
+                "reason": last_feedback or "Quality gate rejected after maximum retries.",
+            })
+            if event_callback:
+                event_callback({
+                    "event": "FINDING_UNRESOLVED",
+                    "finding_id": f_id,
+                    "joint": j_name,
+                    "anomaly_type": a_type,
+                    "reason": last_feedback,
+                })
+
+    final_whole_ok = False
+    whole_errs = []
+    if accumulated_patches:
+        apply_direct_bvh_channel_patch(
+            original_bvh_path=input_bvh_path,
+            output_bvh_path=output_bvh_path,
+            channel_modifications=accumulated_patches,
+            authorized_edit_mask=all_authorized_mask,
+        )
+        final_whole_ok, whole_errs = validate_repair_quality(
+            original_bvh_path=input_bvh_path,
+            repaired_bvh_path=output_bvh_path,
+            authorized_mask=all_authorized_mask,
+            findings=fixed_findings,
+        )
+
+    if not fixed_findings or not final_whole_ok:
+        outcome_status = "FAILED"
+        if os.path.exists(output_bvh_path):
+            try:
+                os.remove(output_bvh_path)
+            except OSError:
+                pass
+        result_path = None
+    elif unresolved_findings:
+        outcome_status = "PARTIALLY_REPAIRED"
+        result_path = output_bvh_path
+    else:
+        outcome_status = "COMPLETED"
+        result_path = output_bvh_path
+
+    fixed_joints = sorted(list(set(f["joint"] for f in fixed_findings)))
+    unres_joints = sorted(list(set(f["joint"] for f in unresolved_findings)))
+
+    if outcome_status == "COMPLETED":
+        summary_message = f"All {len(fixed_findings)} motion issues repaired successfully across {', '.join(fixed_joints)}."
+    elif outcome_status == "PARTIALLY_REPAIRED":
+        summary_message = f"Repaired {len(fixed_findings)} of {len(norm_findings)} motion issues across {', '.join(fixed_joints)}. {len(unresolved_findings)} issues on {', '.join(unres_joints)} could not be resolved."
+    else:
+        if whole_errs:
+            summary_message = f"Repair rejected by final quality validation: {'; '.join(whole_errs)}"
+        elif unresolved_findings:
+            summary_message = f"Repair failed: None of the {len(norm_findings)} motion issues could be repaired after {max_retries} retries."
+        else:
+            summary_message = "No defects were authorized or found to repair."
+
+    metrics = {
+        "outcome_status": outcome_status,
+        "total_findings": len(norm_findings),
+        "fixed_count": len(fixed_findings),
+        "unresolved_count": len(unresolved_findings),
+        "fixed_findings": fixed_findings,
+        "unresolved_findings": unresolved_findings,
+        "summary_message": summary_message,
+        "patches_applied": len(accumulated_patches),
+        "authorized_channels_count": len(all_authorized_mask),
+        "retry_counts": retry_stats,
+        "qa_passed": outcome_status in ("COMPLETED", "PARTIALLY_REPAIRED"),
+    }
+    return result_path, metrics
+
 def execute_deterministic_safe_repair(
     input_bvh_path: str,
     output_bvh_path: str,
@@ -1619,36 +2077,15 @@ def execute_deterministic_safe_repair(
     if os.path.abspath(input_bvh_path) == os.path.abspath(output_bvh_path):
         raise ValueError("Safe repair requires separate asset output; in-place modification prohibited.")
 
-    parsed = parse_bvh_file(input_bvh_path)
-    authorized_mask = build_edit_mask(parsed, roster=roster, findings=findings)
-    patches = compute_deterministic_repairs(parsed, roster=roster, findings=findings)
-
-    apply_direct_bvh_channel_patch(
-        original_bvh_path=input_bvh_path,
+    rep_path, metrics = execute_progressive_finding_repair(
+        input_bvh_path=input_bvh_path,
         output_bvh_path=output_bvh_path,
-        channel_modifications=patches,
-        authorized_edit_mask=authorized_mask,
-    )
-
-    passed, errors = validate_repair_quality(
-        original_bvh_path=input_bvh_path,
-        repaired_bvh_path=output_bvh_path,
+        approved_findings=findings,
         roster=roster,
-        findings=findings,
-        authorized_mask=authorized_mask,
+        max_retries=3,
     )
+    if rep_path is None or metrics.get("outcome_status") == "FAILED":
+        summary_msg = metrics.get("summary_message", "Quality acceptance gate rejected repair.")
+        raise ValueError(f"Quality acceptance gate rejected repair: {summary_msg}")
 
-    if not passed:
-        if os.path.exists(output_bvh_path):
-            try:
-                os.remove(output_bvh_path)
-            except OSError:
-                pass
-        raise ValueError(f"Quality acceptance gate rejected repair: {'; '.join(errors)}")
-
-    metrics = {
-        "patches_applied": len(patches),
-        "authorized_channels_count": len(authorized_mask),
-        "qa_passed": True,
-    }
-    return output_bvh_path, metrics
+    return rep_path, metrics

@@ -259,7 +259,6 @@ def test_zero_comments_rule():
         os.path.join(project_root, "detector.py"),
         os.path.join(project_root, "tests", "benchmark_data.py"),
         os.path.join(project_root, "tests", "test_detector.py"),
-        os.path.join(project_root, "batch_orchestrator.py"),
         os.path.join(project_root, "main.py"),
         os.path.join(project_root, "tests", "test_contract.py"),
         os.path.join(project_root, "tests", "test_shared_motion.py"),

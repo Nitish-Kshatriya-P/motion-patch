@@ -15,6 +15,7 @@ class LifecycleState(str, Enum):
     VALIDATING = "VALIDATING"
     PREVIEWING = "PREVIEWING"
     COMPLETED = "COMPLETED"
+    PARTIALLY_REPAIRED = "PARTIALLY_REPAIRED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
 
@@ -90,8 +91,6 @@ class InstructionPayload(BaseModel):
     prompt: Optional[str] = ""
     audio_data: Optional[bytes] = None
     audio_mime: Optional[str] = None
-
-
 class BatchFile(BaseModel):
     id: str
     original_name: str
@@ -542,7 +541,9 @@ class ApprovalCredentials(BaseModel):
     approval_id: str
 
 
-RunExecutionRequest = ApprovalCredentials
+class RunExecutionRequest(ApprovalCredentials):
+    prompt: Optional[str] = None
+    selected_joints: Optional[List[str]] = None
 
 
 class LegacyRunBlenderRequest(BaseModel):
@@ -609,6 +610,8 @@ class DiagnosticSummaryResponse(BaseModel):
 class SessionChatRequest(BaseModel):
     message: str
     asset_id: Optional[str] = None
+    audio_base64: Optional[str] = None
+    audio_mime: Optional[str] = None
 
 
 class SessionChatResponse(BaseModel):

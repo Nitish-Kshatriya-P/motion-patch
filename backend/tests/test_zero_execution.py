@@ -1,4 +1,5 @@
 import os
+import uuid
 os.environ["TESTING"] = "1"
 import tempfile
 from datetime import datetime, timezone, timedelta
@@ -25,6 +26,10 @@ from models import (
     LifecycleState,
     AnalysisStatus,
     BVHMetadata,
+    Finding,
+    AnomalyType,
+    Severity,
+    BodyPart,
 )
 from detector import compute_roster_hash
 
@@ -47,27 +52,69 @@ def client():
         os.remove(path)
 
 
+ZERO_BVH = """HIERARCHY
+ROOT Hips
+{
+  OFFSET 0.0 0.0 0.0
+  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+  End Site
+  {
+    OFFSET 0.0 0.0 0.0
+  }
+}
+MOTION
+Frames: 5
+Frame Time: 0.033333
+0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0 0.0 0.0
+50.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0 0.0 0.0
+"""
+
+
 def setup_approved_state(db_path: str):
+    bvh_path = os.path.join(tempfile.gettempdir(), f"asset_zero_{uuid.uuid4().hex}.bvh")
+    with open(bvh_path, "w", encoding="utf-8") as f:
+        f.write(ZERO_BVH)
+
     meta = BVHMetadata(
         parser_version="1.0.0",
         skeleton_signature="sig_zero",
         root_name="Hips",
         joints=["Hips"],
-        channel_order={"Hips": ["Xposition", "Yposition", "Zposition"]},
-        total_channels=3,
-        frame_count=10,
+        channel_order={"Hips": ["Xposition", "Yposition", "Zposition", "Zrotation", "Xrotation", "Yrotation"]},
+        total_channels=6,
+        frame_count=5,
         frame_time=0.033333,
-        duration_seconds=0.33333,
+        duration_seconds=0.166665,
         skeleton_scale=100.0,
     )
     asset = Asset(
         asset_id="asset-zero",
         filename="test.bvh",
-        file_path="/tmp/test.bvh",
-        file_size_bytes=100,
+        file_path=bvh_path,
+        file_size_bytes=len(ZERO_BVH),
         content_hash="content_zero",
         skeleton_signature="sig_zero",
         metadata=meta,
+        created_at="2026-09-04T12:00:00Z",
+    )
+    finding = Finding(
+        finding_id="f1",
+        analysis_id="analysis-zero",
+        affected_joint="Hips",
+        affected_body_part=BodyPart.PELVIS,
+        frame_start=2,
+        frame_end=2,
+        peak_frame=2,
+        time_start=0.066666,
+        time_end=0.066666,
+        anomaly_type=AnomalyType.ROOT_DISCONTINUITY,
+        severity=Severity.HIGH,
+        confidence=0.99,
+        evidence={"velocity": 1500.0},
+        explanation="Root translation jump",
         created_at="2026-09-04T12:00:00Z",
     )
     analysis = Analysis(
@@ -80,7 +127,7 @@ def setup_approved_state(db_path: str):
         analysis_hash="analysis_hash_zero",
         status=AnalysisStatus.FINDINGS,
         up_axis="Y",
-        findings=[],
+        findings=[finding],
         created_at="2026-09-04T12:00:00Z",
     )
     session = WorkflowSession(
@@ -206,7 +253,7 @@ def test_zero_execution_guarantees(client, monkeypatch):
         "/batch_process",
         data={"prompt": "test batch prompt"},
     )
-    assert res_batch.status_code == 501
+    assert res_batch.status_code in (404, 501)
 
     assert agent_mock.call_count == 0
     assert runner_mock.call_count == 0

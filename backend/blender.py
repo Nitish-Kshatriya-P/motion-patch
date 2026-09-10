@@ -9,7 +9,7 @@ from models import ExecutionParams
 
 def is_docker_responsive() -> bool:
     try:
-        proc = subprocess.run(["docker", "info"], capture_output=True, timeout=2)
+        proc = subprocess.run(["docker", "info"], capture_output=True, timeout=8)
         return proc.returncode == 0
     except Exception:
         return False

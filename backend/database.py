@@ -2,6 +2,8 @@ import os
 import sqlite3
 import json
 import re
+import uuid
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
@@ -357,6 +359,24 @@ def init_db(db_path: Optional[str] = None) -> None:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_human_feedback_split ON human_feedback(split);")
             except Exception:
                 pass
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    text TEXT,
+                    message_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES workflow_sessions(session_id) ON DELETE CASCADE
+                );
+                """
+            )
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);")
+            except Exception:
+                pass
 
 
 def insert_asset(conn: sqlite3.Connection, asset: Asset) -> None:
@@ -706,42 +726,6 @@ def update_session_state(
     )
 
 
-def count_session_uploads(conn: sqlite3.Connection, session_id: str) -> int:
-    cursor = conn.execute("SELECT COUNT(*) FROM session_uploads WHERE session_id = ?;", (session_id,))
-    row = cursor.fetchone()
-    return row[0] if row else 0
-
-
-def insert_session_upload(
-    conn: sqlite3.Connection,
-    session_id: str,
-    asset_id: str,
-    filename: str,
-    uploaded_at: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO session_uploads (session_id, asset_id, filename, uploaded_at)
-        VALUES (?, ?, ?, ?);
-        """,
-        (session_id, asset_id, filename, uploaded_at),
-    )
-    conn.commit()
-
-
-def list_session_uploads(conn: sqlite3.Connection, session_id: str) -> List[Dict[str, Any]]:
-    cursor = conn.execute(
-        """
-        SELECT id, session_id, asset_id, filename, uploaded_at
-        FROM session_uploads
-        WHERE session_id = ?
-        ORDER BY id ASC;
-        """,
-        (session_id,),
-    )
-    return [dict(row) for row in cursor.fetchall()]
-
-
 def insert_repair_plan(conn: sqlite3.Connection, plan: RepairPlan) -> None:
     roster_data = [item.model_dump() for item in plan.proposed_roster]
     conn.execute(
@@ -935,7 +919,7 @@ def list_workflow_sessions(conn: sqlite3.Connection, limit: int = 50) -> List[Di
         except Exception:
             pass
         orig_id = row["original_asset_id"] or row["asset_id"]
-        rep_id = row["asset_id"] if row["lifecycle_state"] == "COMPLETED" and row["asset_id"] != orig_id else (row["asset_id"] if row["lifecycle_state"] == "COMPLETED" else None)
+        rep_id = row["asset_id"] if row["lifecycle_state"] == "COMPLETED" and row["asset_id"] != orig_id else None
         session_title = row["title"] if "title" in row.keys() and row["title"] else None
         if not session_title or is_uuid_like(session_title):
             session_title = generate_session_title(
@@ -1328,4 +1312,44 @@ def evaluate_false_alarms(
     }
 
 
+def save_chat_message(conn: sqlite3.Connection, session_id: str, message: Dict[str, Any]) -> None:
+    msg_id = message.get("id") or f"msg-{uuid.uuid4().hex[:12]}"
+    sender = message.get("sender", "assistant")
+    timestamp = message.get("timestamp") or datetime.now(timezone.utc).isoformat()
+    text = message.get("text", "")
+    message_json = json.dumps(message)
+    conn.execute(
+        """
+        INSERT INTO chat_messages (id, session_id, sender, timestamp, text, message_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            text = excluded.text,
+            message_json = excluded.message_json,
+            timestamp = excluded.timestamp;
+        """,
+        (msg_id, session_id, sender, timestamp, text, message_json, timestamp),
+    )
 
+
+def save_chat_messages(conn: sqlite3.Connection, session_id: str, messages: List[Dict[str, Any]]) -> None:
+    for m in messages:
+        if isinstance(m, dict):
+            save_chat_message(conn, session_id, m)
+
+
+def get_chat_messages(conn: sqlite3.Connection, session_id: str) -> List[Dict[str, Any]]:
+    cursor = conn.execute(
+        "SELECT message_json FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC;",
+        (session_id,),
+    )
+    result = []
+    for row in cursor.fetchall():
+        try:
+            result.append(json.loads(row["message_json"]))
+        except Exception:
+            pass
+    return result
+
+
+def delete_session_messages(conn: sqlite3.Connection, session_id: str) -> None:
+    conn.execute("DELETE FROM chat_messages WHERE session_id = ?;", (session_id,))

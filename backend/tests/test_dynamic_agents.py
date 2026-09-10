@@ -403,3 +403,24 @@ def test_approval_verify_against_methods():
 
     approval_mismatch = approval.model_copy(update={"repair_plan_version": 2})
     assert "version" in approval_mismatch.verify_against(session, plan, analysis).lower()
+
+def test_selective_body_part_and_custom_instruction_synthesis():
+    findings = [
+        {"affected_joint": "LeftFoot", "anomaly_type": "PLANTED_FOOT_SLIDING", "frame_start": 10, "frame_end": 20},
+        {"affected_joint": "RightFoot", "anomaly_type": "PLANTED_FOOT_SLIDING", "frame_start": 30, "frame_end": 40},
+        {"affected_joint": "Spine", "anomaly_type": "ROTATION_JITTER", "frame_start": 5, "frame_end": 50},
+        {"affected_joint": "Hips", "anomaly_type": "ROOT_DISCONTINUITY", "frame_start": 1, "frame_end": 15},
+    ]
+    roster_left_foot = agent_module.synthesize_agent_roster(findings=findings, selected_joints=["LeftFoot"])
+    assert len(roster_left_foot) == 1
+    assert roster_left_foot[0].assigned_joints == ["LeftFoot"]
+
+    roster_spine_instruction = agent_module.synthesize_agent_roster(prompt="Smooth spine jitter", findings=findings)
+    assert len(roster_spine_instruction) == 1
+    assert "Spine" in roster_spine_instruction[0].assigned_joints
+
+    roster_both_feet = agent_module.synthesize_agent_roster(findings=findings, selected_joints=["LeftFoot", "RightFoot"])
+    assert len(roster_both_feet) == 1
+    assert "LeftFoot" in roster_both_feet[0].assigned_joints
+    assert "RightFoot" in roster_both_feet[0].assigned_joints
+

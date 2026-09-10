@@ -181,7 +181,7 @@ def test_upload_with_findings_plan_and_approval_flow(api_client):
             "approval_id": approval_id,
         },
     )
-    assert run_res.status_code == 200
+    assert run_res.status_code == 200, run_res.json()
     assert run_res.json()["status"] in ("APPROVED", "COMPLETED")
 
 
