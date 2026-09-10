@@ -1,124 +1,137 @@
-# Motion capture studio
+# MotionPatch: AI Motion Capture Studio
 
-This project checks motion capture files in BVH format for quality defects like foot sliding, marker dropouts, and gimbal lock flips. It synthesizes repair plans with Google Cloud Vertex AI, renders interactive 3D motion comparisons in the browser, and exports repaired BVH files through deterministic mathematical solvers or headless Blender running in Docker.
+Detect and repair kinematic motion capture defects (foot sliding, rotation jitter, root velocity jumps, gimbal lock) in BVH files with AI agent rosters and deterministic solvers.
 
 ## Prerequisites
 
-Before starting, install the following tools:
+- **Python**: 3.10 or later
+- **Node.js**: 18 or later and npm
+- **Git**
+- *(Optional)* **Docker Desktop**: For headless Blender repairs and ClickHouse RAG.
+- *(Optional)* **Google Cloud CLI (`gcloud`)**: For live Vertex AI / Gemini agent synthesis. The system runs offline with deterministic solvers if GCP is not configured.
 
-- Git
-- Python 3.10 or later
-- Node.js 18 or later and npm
-- Docker Desktop, running locally
-- Google Cloud CLI (`gcloud`) with access to a Google Cloud project with Vertex AI enabled
+---
 
-## Clone the repository
-
-Clone the repository and move into the project directory:
+## 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-org/G-Hack.git
-cd G-Hack
+git clone https://github.com/Nitish-Kshatriya-P/motion-patch.git
+cd motion-patch
 ```
 
-## Google Cloud setup
+---
 
-The backend calls Gemini models on Google Cloud Vertex AI using Application Default Credentials (ADC).
+## 2. Backend Setup
 
-If you want an interactive setup script that links billing, verifies APIs, and exports environment values, run the setup wizard from the repository root:
-
-```bash
-bash tools/gcp_demo_wizard.sh
-```
-
-To configure credentials manually, log in with `gcloud`:
-
-```bash
-gcloud auth application-default login
-```
-
-Set the required environment variables:
-
-- `GOOGLE_CLOUD_PROJECT`: Your Google Cloud project ID
-- `GOOGLE_CLOUD_LOCATION`: The Vertex AI region, such as `us-central1`
-- `GOOGLE_GENAI_USE_VERTEXAI`: Set to `true`
-
-On Linux or macOS:
-
-```bash
-export GOOGLE_CLOUD_PROJECT="your-project-id"
-export GOOGLE_CLOUD_LOCATION="us-central1"
-export GOOGLE_GENAI_USE_VERTEXAI="true"
-```
-
-On Windows Command Prompt:
-
-```cmd
-set GOOGLE_CLOUD_PROJECT=your-project-id
-set GOOGLE_CLOUD_LOCATION=us-central1
-set GOOGLE_GENAI_USE_VERTEXAI=true
-```
-
-On Windows PowerShell:
-
-```powershell
-$env:GOOGLE_CLOUD_PROJECT="your-project-id"
-$env:GOOGLE_CLOUD_LOCATION="us-central1"
-$env:GOOGLE_GENAI_USE_VERTEXAI="true"
-```
-
-## Backend setup
-
-Navigate to the `backend` folder and create a Python virtual environment:
+1. Navigate to `backend` and create a virtual environment:
 
 ```bash
 cd backend
 python -m venv venv
 ```
 
-Activate the virtual environment:
+2. Activate the virtual environment:
+   - **Linux / macOS**:
+     ```bash
+     source venv/bin/activate
+     ```
+   - **Windows (PowerShell)**:
+     ```powershell
+     .\venv\Scripts\Activate.ps1
+     ```
+   - **Windows (CMD)**:
+     ```cmd
+     venv\Scripts\activate.bat
+     ```
 
-On Linux or macOS:
-
-```bash
-source venv/bin/activate
-```
-
-On Windows:
-
-```cmd
-venv\Scripts\activate
-```
-
-Install the backend dependencies:
-
-```bash
-pip install fastapi uvicorn pydantic pydantic-settings google-genai google-cloud-aiplatform clickhouse-connect pytest
-```
-
-## Headless Blender container
-
-Build the Docker image used for headless Blender script execution:
+3. Install dependencies:
 
 ```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 3. Environment & Google Cloud Setup
+
+The backend uses Gemini on Vertex AI for agent roster synthesis, with automatic fallback to deterministic solvers if credentials are not provided.
+
+### Option A: Setup Wizard (Recommended for GCP)
+
+From the project root:
+
+```bash
+bash tools/gcp_demo_wizard.sh
+```
+
+### Option B: Manual GCP Authentication
+
+```bash
+gcloud auth application-default login
+```
+
+Set environment variables:
+
+- **Linux / macOS**:
+  ```bash
+  export GOOGLE_CLOUD_PROJECT="your-project-id"
+  export GOOGLE_CLOUD_LOCATION="us-central1"
+  export GOOGLE_GENAI_USE_VERTEXAI="true"
+  ```
+- **Windows (PowerShell)**:
+  ```powershell
+  $env:GOOGLE_CLOUD_PROJECT="your-project-id"
+  $env:GOOGLE_CLOUD_LOCATION="us-central1"
+  $env:GOOGLE_GENAI_USE_VERTEXAI="true"
+  ```
+- **Windows (CMD)**:
+  ```cmd
+  set GOOGLE_CLOUD_PROJECT=your-project-id
+  set GOOGLE_CLOUD_LOCATION=us-central1
+  set GOOGLE_GENAI_USE_VERTEXAI=true
+  ```
+
+*(To run offline or in automated test mode without GCP, set `TESTING=1`)*
+
+---
+
+## 4. Optional Services
+
+### Headless Blender (Docker)
+Required only if executing Blender-based script repairs:
+
+```bash
+# From repository root:
+docker build -t headless-blender -f backend/Dockerfile.blender backend
+
+# Or from backend directory:
+cd backend
 docker build -t headless-blender -f Dockerfile.blender .
 ```
 
-Keep Docker Desktop running so the backend can launch this container during repair jobs.
+### ClickHouse RAG (Docker)
+Required only if using persistent vector search for repair scripts:
 
-## Start the backend server
+```bash
+docker compose up -d clickhouse
+```
 
-Start FastAPI with uvicorn:
+---
+
+## 5. Run the Application
+
+### Start Backend Server
+From the `backend` directory (with virtual environment activated):
 
 ```bash
 uvicorn main:app --reload --port 8000
 ```
 
-The API service runs at `http://localhost:8000`. You can test endpoints and review the schema at `http://localhost:8000/docs`.
+- API Server: `http://localhost:8000`
+- Interactive API Docs (Swagger): `http://localhost:8000/docs`
 
-## Start the frontend application
-
-Open a new terminal window, navigate to the `frontend` directory, install packages, and start the development server:
+### Start Frontend Client
+Open a second terminal, navigate to `frontend`:
 
 ```bash
 cd frontend
@@ -126,21 +139,23 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser to view the studio interface, upload BVH files, and inspect motion trajectories.
+- Web Studio: `http://localhost:5173`
 
-## Run automated tests
+---
 
-Run the backend test suite:
+## 6. Run Tests
+
+### Backend Tests
+From the `backend` directory:
 
 ```bash
-cd backend
 pytest tests
 ```
 
-Run frontend tests and lint checks:
+### Frontend Tests & Lint
+From the `frontend` directory:
 
 ```bash
-cd frontend
 npm run test
 npm run lint
 ```
